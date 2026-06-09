@@ -9,7 +9,7 @@ import ipaddress
 from typing import List, Dict, Any
 from fastapi import HTTPException
 
-from ...config.settings import get_site_prefix, NETWORK_SITE_IP_PREFIXES
+from ...config.settings import get_site_prefix
 
 logger = logging.getLogger(__name__)
 
@@ -18,45 +18,26 @@ class NetworkValidators:
     """Validators for network and IP-related fields"""
 
     @staticmethod
-    def validate_segment_format(segment: str, site: str, vrf: str = None) -> None:
-        """Validate that segment IP matches network+site prefix and is proper network format
+    def validate_segment_format(segment: str, site: str) -> None:
+        """Validate that segment IP matches the site's IP prefix and is proper network format.
 
         Args:
             segment: IP network in CIDR format (e.g., "192.168.1.0/24")
             site: Site name (e.g., "Site1")
-            vrf: VRF/Network name (e.g., "Network1"). Used to determine correct IP prefix for the site.
 
         Raises:
             HTTPException: If segment format is invalid or doesn't match expected prefix
         """
-        logger.debug(f"Validating segment format: '{segment}' for {vrf}/{site}")
-        expected_prefix = get_site_prefix(site, vrf)
+        logger.debug(f"Validating segment format: '{segment}' for site '{site}'")
+        expected_prefix = get_site_prefix(site)
 
-        # Validate that prefix mapping exists for this network+site combination
         if expected_prefix is None:
-            # Show available combinations for this network or this site
-            available_combinations = list(NETWORK_SITE_IP_PREFIXES.keys())
-
-            # Filter to show relevant combinations
-            same_network = [f"{n}:{s}" for n, s in available_combinations if n == vrf]
-            same_site = [f"{n}:{s}" for n, s in available_combinations if s == site]
-
-            error_detail = f"Network '{vrf}' at site '{site}' is not configured. "
-
-            if same_network:
-                error_detail += f"\n• Network '{vrf}' is available at sites: {', '.join([s for n, s in available_combinations if n == vrf])}"
-            else:
-                error_detail += f"\n• Network '{vrf}' is not configured at any site"
-
-            if same_site:
-                error_detail += f"\n• Site '{site}' is available in networks: {', '.join([n for n, s in available_combinations if s == site])}"
-            else:
-                error_detail += f"\n• Site '{site}' is not configured in any network"
-
-            error_detail += f"\n• To enable this combination, add: NETWORK_SITE_PREFIXES='{vrf}:{site}:<prefix>'"
-
-            logger.error(f"No IP prefix configured for {vrf}/{site}")
-            raise HTTPException(status_code=400, detail=error_detail)
+            logger.error(f"No IP prefix configured for site '{site}'")
+            raise HTTPException(
+                status_code=400,
+                detail=f"Site '{site}' is not configured. "
+                       f"Please ensure the site is listed in SITES and has a corresponding entry in SITE_PREFIXES."
+            )
 
         try:
             # First validate that the segment includes explicit subnet mask
@@ -83,10 +64,10 @@ class NetworkValidators:
             first_octet = str(network.network_address).split('.')[0]
 
             if first_octet != expected_prefix:
-                logger.warning(f"IP prefix mismatch for {vrf}/{site}: expected '{expected_prefix}', got '{first_octet}'")
+                logger.warning(f"IP prefix mismatch for site '{site}': expected '{expected_prefix}', got '{first_octet}'")
                 raise HTTPException(
                     status_code=400,
-                    detail=f"Invalid IP prefix for network '{vrf}' at site '{site}'. "
+                    detail=f"Invalid IP prefix for site '{site}'. "
                            f"Expected to start with '{expected_prefix}', got '{first_octet}'"
                 )
 
@@ -126,17 +107,8 @@ class NetworkValidators:
         try:
             network = ipaddress.ip_network(segment, strict=False)
 
-            # Check for reserved ranges
-            # 0.0.0.0/8 - Current network
-            # 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 - Private (OK for datacenter)
-            # 127.0.0.0/8 - Loopback
-            # 169.254.0.0/16 - Link-local
-            # 224.0.0.0/4 - Multicast
-            # 240.0.0.0/4 - Reserved
-
             first_octet = int(str(network.network_address).split('.')[0])
 
-            # Disallow certain ranges
             if first_octet == 0:
                 raise HTTPException(
                     status_code=400,
@@ -191,7 +163,6 @@ class NetworkValidators:
                 try:
                     existing_network = ipaddress.ip_network(existing["segment"], strict=False)
 
-                    # Check if networks overlap
                     if new_network.overlaps(existing_network):
                         logger.warning(f"IP overlap detected: {new_segment} overlaps with {existing['segment']}")
                         raise HTTPException(
@@ -201,7 +172,6 @@ class NetworkValidators:
                         )
 
                 except ValueError:
-                    # Skip invalid existing segments
                     logger.warning(f"Skipping invalid existing segment: {existing.get('segment')}")
                     continue
 
@@ -226,7 +196,6 @@ class NetworkValidators:
             network = ipaddress.ip_network(segment, strict=False)
             num_addresses = network.num_addresses
 
-            # Reject networks with fewer than 2 addresses (/32 host routes)
             if num_addresses < 2:
                 logger.warning(f"Network too small: {segment} has only {num_addresses} addresses")
                 raise HTTPException(

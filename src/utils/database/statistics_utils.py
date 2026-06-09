@@ -6,7 +6,7 @@ Handles calculation of site statistics and utilization metrics.
 import logging
 from typing import Dict, Any, List
 
-from ...database.netbox_segments import get_segments
+from ...database import get_segments
 from ...config.settings import SITES
 
 logger = logging.getLogger(__name__)

@@ -37,7 +37,6 @@ class DatabaseUtils:
     check_vlan_exists = staticmethod(SegmentQueries.check_vlan_exists)
     check_vlan_exists_excluding_id = staticmethod(SegmentQueries.check_vlan_exists_excluding_id)
     search_segments = staticmethod(SegmentQueries.search_segments)
-    get_vrfs = staticmethod(SegmentQueries.get_vrfs)
 
     # Statistics operations
     get_site_statistics = staticmethod(StatisticsUtils.get_site_statistics)

@@ -6,7 +6,7 @@ from specialized validator modules. This maintains backward compatibility with e
 Module structure:
 - input_validators.py: Site, VLAN ID, EPG name, cluster name, description
 - network_validators.py: IP format, subnet masks, reserved IPs, overlap detection
-- organization_validators.py: VRF, allocation state, uniqueness
+- organization_validators.py: Allocation state, uniqueness
 """
 
 from .input_validators import InputValidators
@@ -35,8 +35,6 @@ class Validators:
     # Organization/business validation methods
     validate_segment_not_allocated = staticmethod(OrganizationValidators.validate_segment_not_allocated)
     validate_vlan_name_uniqueness = staticmethod(OrganizationValidators.validate_vlan_name_uniqueness)
-    validate_vrf = staticmethod(OrganizationValidators.validate_vrf)
-
 
 
 # Export all classes for direct import if needed

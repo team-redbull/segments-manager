@@ -61,28 +61,22 @@ config:
   serverPort: "8000"
   logLevel: "INFO"
 
-# NetBox Integration Configuration
-netbox:
-  # NetBox API URL (required for NetBox backend)
-  url: "https://your-netbox-instance.com"
+# MongoDB Configuration
+mongodb:
+  # MongoDB connection URL - REQUIRED (stored in Secret)
+  # Example: mongodb://user:pass@mongodb:27017 or mongodb+srv://... for Atlas
+  url: "mongodb://localhost:27017"
 
-  # NetBox API Token - REQUIRED (stored in Secret)
-  # Create a token in NetBox UI: Admin > API Tokens
-  token: "your-api-token-here"
+  # Database name (optional, default: vlan_manager)
+  dbName: "vlan_manager"
 
-  # SSL Certificate Verification
-  sslVerify: "true"
-
-  # Use existing secret for NetBox token (optional)
-  # If specified, the token above will be ignored
+  # Use existing secret for MongoDB URL (optional)
   existingSecret: ""
-  existingSecretKey: "netbox-token"
+  existingSecretKey: "mongodb-url"
 
-# Persistent Volume Claim for data storage
-# NOTE: Not needed for NetBox backend (data stored in NetBox)
-# Can be disabled when using NetBox
+# Persistent Volume Claim
 persistence:
-  enabled: false  # Changed to false for NetBox - enable if you want local caching
+  enabled: false
   storageClass: ""  # Uses default StorageClass
   accessMode: ReadWriteOnce
   size: 1Gi

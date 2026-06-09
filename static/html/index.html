@@ -68,12 +68,6 @@
                 <h2>Add Segment</h2>
                 <form id="addSegmentForm">
                     <div class="form-group">
-                        <label for="segmentVrf">VRF / Network</label>
-                        <select id="segmentVrf" required>
-                            <option value="">Select VRF...</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
                         <label for="segmentSite">Site</label>
                         <select id="segmentSite" required>
                             <option value="">Select site...</option>
@@ -109,12 +103,6 @@
                 <h2>Allocate Segment</h2>
                 <form id="allocateForm">
                     <div class="form-group">
-                        <label for="allocationVrf">Network (VRF)</label>
-                        <select id="allocationVrf" required>
-                            <option value="">Select Network...</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
                         <label for="allocationSite">Site</label>
                         <select id="allocationSite" required>
                             <option value="">Select site...</option>
@@ -134,10 +122,10 @@
         <div class="card full-width" id="bulkImportCard" style="display: none;">
             <h2>Bulk Import Segments</h2>
             <div class="form-group">
-                <label for="bulkImport">Paste CSV data (site,vlan_id,epg_name,segment,vrf,dhcp,description)</label>
-                <textarea id="bulkImport" placeholder="site1,100,EPG_PROD_01,192.168.1.0/24,Network1,true,Production segment
-site1,101,EPG_PROD_02,192.168.2.0/24,Network1,false,Production segment 2
-site2,200,EPG_DEV_01,10.0.1.0/24,true,Development segment"></textarea>
+                <label for="bulkImport">Paste CSV data (site,vlan_id,epg_name,segment,dhcp,description)</label>
+                <textarea id="bulkImport" placeholder="site1,100,EPG_PROD_01,192.168.1.0/24,true,Production segment
+site1,101,EPG_PROD_02,192.168.2.0/24,false,Production segment 2
+site2,200,EPG_DEV_01,193.0.1.0/24,true,Development segment"></textarea>
             </div>
             <button onclick="importBulk()">Import Segments</button>
         </div>
@@ -173,7 +161,6 @@ site2,200,EPG_DEV_01,10.0.1.0/24,true,Development segment"></textarea>
                     <thead>
                         <tr>
                             <th>Site</th>
-                            <th>VRF</th>
                             <th>VLAN ID</th>
                             <th>EPG Name</th>
                             <th>Network Segment</th>
@@ -185,7 +172,7 @@ site2,200,EPG_DEV_01,10.0.1.0/24,true,Development segment"></textarea>
                     </thead>
                     <tbody id="segmentsList">
                         <tr>
-                            <td colspan="9" class="empty-state">Loading segments...</td>
+                            <td colspan="8" class="empty-state">Loading segments...</td>
                         </tr>
                     </tbody>
                 </table>

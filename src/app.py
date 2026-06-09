@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config.settings import setup_logging, SITES, validate_site_prefixes
 from .api.routes import router
-from .database.netbox_storage import init_storage, close_storage
+from .database import init_storage, close_storage
 from .auth.auth import init_sessions
 import os
 
@@ -28,7 +28,7 @@ async def lifespan(app: FastAPI):
         logger.info("Site prefixes validation passed")
 
         await init_storage()
-        logger.info(f"NetBox storage initialized. Managing sites: {SITES}")
+        logger.info(f"MongoDB storage initialized. Managing sites: {SITES}")
     except Exception as e:
         logger.error(f"Failed to initialize application: {e}")
         raise

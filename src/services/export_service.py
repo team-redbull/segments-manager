@@ -7,7 +7,7 @@ from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
 
 from ..utils.database_utils import DatabaseUtils
-from ..utils.error_handlers import handle_netbox_errors, retry_on_network_error
+from ..utils.error_handlers import handle_db_errors, retry_on_network_error
 from ..utils.logging_decorators import log_operation_timing
 
 logger = logging.getLogger(__name__)
@@ -30,7 +30,6 @@ class ExportService:
         for segment in segments:
             export_data.append({
                 'Site': segment.get('site', ''),
-                'VRF': segment.get('vrf', ''),
                 'VLAN ID': segment.get('vlan_id', ''),
                 'EPG Name': segment.get('epg_name', ''),
                 'Segment': segment.get('segment', ''),
@@ -45,7 +44,7 @@ class ExportService:
         return export_data
 
     @staticmethod
-    @handle_netbox_errors
+    @handle_db_errors
     @retry_on_network_error(max_retries=3)
     @log_operation_timing("export_segments_csv", threshold_ms=3000)
     async def export_segments_csv(site: Optional[str] = None, allocated: Optional[bool] = None) -> StreamingResponse:
@@ -78,7 +77,7 @@ class ExportService:
         )
     
     @staticmethod
-    @handle_netbox_errors
+    @handle_db_errors
     @retry_on_network_error(max_retries=3)
     @log_operation_timing("export_segments_excel", threshold_ms=3000)
     async def export_segments_excel(site: Optional[str] = None, allocated: Optional[bool] = None) -> StreamingResponse:
@@ -127,7 +126,7 @@ class ExportService:
         )
     
     @staticmethod
-    @handle_netbox_errors
+    @handle_db_errors
     @retry_on_network_error(max_retries=3)
     @log_operation_timing("export_stats_csv", threshold_ms=2000)
     async def export_stats_csv() -> StreamingResponse:

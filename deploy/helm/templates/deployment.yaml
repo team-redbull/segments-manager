@@ -73,23 +73,18 @@ spec:
                 configMapKeyRef:
                   name: {{ include "vlan-manager.fullname" . }}
                   key: LOG_LEVEL
-            # NetBox configuration from ConfigMap
-            - name: NETBOX_URL
+            # MongoDB database name from ConfigMap
+            - name: MONGODB_DB_NAME
               valueFrom:
                 configMapKeyRef:
                   name: {{ include "vlan-manager.fullname" . }}
-                  key: NETBOX_URL
-            - name: NETBOX_SSL_VERIFY
-              valueFrom:
-                configMapKeyRef:
-                  name: {{ include "vlan-manager.fullname" . }}
-                  key: NETBOX_SSL_VERIFY
-            # NetBox token from Secret
-            - name: NETBOX_TOKEN
+                  key: MONGODB_DB_NAME
+            # MongoDB URL from Secret
+            - name: MONGODB_URL
               valueFrom:
                 secretKeyRef:
-                  name: {{ if .Values.netbox.existingSecret }}{{ .Values.netbox.existingSecret }}{{ else }}{{ include "vlan-manager.fullname" . }}-netbox{{ end }}
-                  key: {{ if .Values.netbox.existingSecret }}{{ .Values.netbox.existingSecretKey }}{{ else }}netbox-token{{ end }}
+                  name: {{ if .Values.mongodb.existingSecret }}{{ .Values.mongodb.existingSecret }}{{ else }}{{ include "vlan-manager.fullname" . }}-mongodb{{ end }}
+                  key: {{ if .Values.mongodb.existingSecret }}{{ .Values.mongodb.existingSecretKey }}{{ else }}mongodb-url{{ end }}
           {{- with .Values.startupProbe }}
           startupProbe:
             {{- toYaml . | nindent 12 }}
