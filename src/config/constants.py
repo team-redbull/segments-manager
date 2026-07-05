@@ -12,33 +12,6 @@ class CacheTTL:
     LONG = 3600      # 1 hour - for rarely changing data
 
 
-class NetBoxStatus:
-    """NetBox prefix status values"""
-    ACTIVE = "active"       # Available for allocation
-    RESERVED = "reserved"   # Allocated to a cluster
-
-
-class NetBoxRole:
-    """NetBox role names"""
-    DATA = "Data"          # Data role for prefixes and VLANs
-
-
-class CustomFields:
-    """NetBox custom field names"""
-    CLUSTER = "Cluster"    # Cluster allocation field
-    DHCP = "DHCP"          # DHCP enabled/disabled field
-
-
-class NetBoxScope:
-    """NetBox scope type values"""
-    SITE_GROUP = "dcim.sitegroup"  # Site group scope type
-
-
-class Tenant:
-    """Tenant configuration"""
-    DEFAULT = "RedBull"    # Default tenant name
-
-
 class VLANConstraints:
     """VLAN ID constraints"""
     MIN_ID = 1
@@ -63,15 +36,9 @@ class FieldLengths:
 
 class PerformanceThresholds:
     """Performance monitoring thresholds in milliseconds"""
-    NETBOX_SLOW_WARNING = 5000      # Warn if NetBox call > 5 seconds
-    NETBOX_SEVERE_WARNING = 20000   # Error if NetBox call > 20 seconds
-    OPERATION_SLOW = 100            # Warn if operation > 100ms
-
-
-class ExecutorConfig:
-    """Thread pool executor configuration"""
-    READ_WORKERS = 30    # Workers for NetBox read operations
-    WRITE_WORKERS = 20   # Workers for NetBox write operations
+    DB_SLOW_WARNING = 5000       # Warn if a database call > 5 seconds
+    DB_SEVERE_WARNING = 20000    # Error if a database call > 20 seconds
+    OPERATION_SLOW = 100         # Warn if operation > 100ms
 
 
 class RateLimits:
@@ -82,15 +49,9 @@ class RateLimits:
 # Export all constant classes
 __all__ = [
     "CacheTTL",
-    "NetBoxStatus",
-    "NetBoxRole",
-    "CustomFields",
-    "NetBoxScope",
-    "Tenant",
     "VLANConstraints",
     "SubnetConstraints",
     "FieldLengths",
     "PerformanceThresholds",
-    "ExecutorConfig",
     "RateLimits",
 ]

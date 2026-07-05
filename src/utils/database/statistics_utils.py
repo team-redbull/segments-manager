@@ -19,13 +19,13 @@ class StatisticsUtils:
     async def get_site_statistics(site: str) -> Dict[str, Any]:
         """Get statistics for a specific site
 
-        Optimized to use single query instead of multiple count_documents calls.
+        Optimized to use a single query instead of multiple count calls.
         This is more efficient because:
-        1. Fetches data from cache (prefixes cached for 10 minutes)
-        2. Calculates counts in Python instead of additional API calls
-        3. Reduces load on NetBox
+        1. Fetches data from cache (segments cached briefly)
+        2. Calculates counts in Python instead of additional queries
+        3. Reduces load on the database
         """
-        # Single query instead of two count_documents calls
+        # Single query instead of two separate count calls
         segments = await get_segments(site=site)
 
         total_segments = len(segments)

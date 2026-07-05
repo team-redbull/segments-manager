@@ -57,7 +57,7 @@ check_env_file() {
         log_error "Environment file '$ENV_FILE' not found!"
         log_info "Creating from template..."
         cp .env.example .env
-        log_warning "Please edit .env with your NetBox credentials before deploying!"
+        log_warning "Please edit .env with your MONGODB_URL before deploying!"
         exit 1
     fi
 }

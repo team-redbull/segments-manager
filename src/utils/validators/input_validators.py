@@ -19,7 +19,7 @@ class InputValidators:
     def validate_site(site: str) -> None:
         """Validate if site is in configured sites (case-insensitive)"""
         logger.debug(f"Validating site: {site}")
-        # Normalize to lowercase for comparison (NetBox slugs are lowercase)
+        # Normalize to lowercase for case-insensitive comparison
         site_lower = site.lower()
         sites_lower = [s.lower() for s in SITES]
         if site_lower not in sites_lower:
@@ -59,7 +59,7 @@ class InputValidators:
                 detail=f"EPG name too long (max 64 characters, got {len(epg_name)})"
             )
 
-        # Check for invalid characters (NetBox VLAN names have restrictions)
+        # Check for invalid characters (restrict to network-safe VLAN name chars)
         if not re.match(r'^[a-zA-Z0-9_\-\./]+$', epg_name):
             logger.warning(f"EPG name contains invalid characters: '{epg_name}'")
             raise HTTPException(

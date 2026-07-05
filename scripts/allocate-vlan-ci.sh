@@ -12,7 +12,6 @@
 #   - VLAN_MANAGER_URL: URL of the VLAN Manager API
 #   - VLAN_MANAGER_TIMEOUT: API timeout in seconds
 #   - VLAN_MANAGER_RETRIES: Number of retry attempts
-#   - VRF: VRF/Network name (e.g., Network1, Network2, Network3)
 #   - CI_PIPELINE_SOURCE: GitLab CI pipeline source
 #   - CI_MERGE_REQUEST_TARGET_BRANCH_NAME: Target branch for MR
 #
@@ -30,17 +29,6 @@ echo ""
 VLAN_MANAGER_URL="${VLAN_MANAGER_URL}"
 VLAN_MANAGER_TIMEOUT="${VLAN_MANAGER_TIMEOUT}"
 VLAN_MANAGER_RETRIES="${VLAN_MANAGER_RETRIES}"
-
-# VRF Configuration - REQUIRED CI Variable
-if [ -z "${VRF}" ]; then
-  echo -e "${RED}[ERROR]${NC} VRF variable is not set!"
-  echo -e "${RED}[ERROR]${NC} Please configure VRF in GitLab CI/CD Variables"
-  echo -e "${RED}[ERROR]${NC} Settings > CI/CD > Variables > Add Variable"
-  echo -e "${RED}[ERROR]${NC} Example values: Network1, Network2, Network3"
-  exit 1
-fi
-
-echo -e "${BLUE}[INFO]${NC} Using VRF: ${VRF}"
 
 # Colors for output
 GREEN='\033[0;32m'
@@ -131,9 +119,8 @@ check_vlan_exists() {
 allocate_vlan() {
   local cluster_name="$1"
   local site="$2"
-  local vrf="${3:-$VRF}"
 
-  echo -e "${BLUE}[INFO]${NC} Allocating VLAN for cluster: ${cluster_name} at site: ${site} (VRF: ${vrf})"
+  echo -e "${BLUE}[INFO]${NC} Allocating VLAN for cluster: ${cluster_name} at site: ${site}"
 
   local response
   local http_code
@@ -148,7 +135,7 @@ allocate_vlan() {
       --max-time "${VLAN_MANAGER_TIMEOUT}" \
       -X POST "${VLAN_MANAGER_URL}/api/allocate-vlan" \
       -H "Content-Type: application/json" \
-      -d "{\"cluster_name\":\"${cluster_name}\",\"site\":\"${site}\",\"vrf\":\"${vrf}\"}" \
+      -d "{\"cluster_name\":\"${cluster_name}\",\"site\":\"${site}\"}" \
       2>/dev/null)
 
     # Extract HTTP code and response body
@@ -298,8 +285,8 @@ while IFS= read -r file; do
     continue
   fi
 
-  # Allocate VLAN (using CI variable VRF)
-  VLAN_ID=$(allocate_vlan "$CLUSTER_NAME" "$SITE" "$VRF")
+  # Allocate VLAN for this cluster at its site
+  VLAN_ID=$(allocate_vlan "$CLUSTER_NAME" "$SITE")
 
   if [ -n "$VLAN_ID" ] && [ "$VLAN_ID" != "null" ]; then
     # Add VLAN to YAML

@@ -2,9 +2,8 @@
 MongoDB Segment Operations
 
 Domain-level async functions for segment CRUD and allocation.
-Preserves the same public interface as the previous netbox_segments.py
-except that the `vrf` parameter is removed everywhere and `get_vrfs()`
-is gone entirely.
+Allocation is atomic via find_one_and_update; segments are scoped
+per-site.
 """
 
 import logging

@@ -93,10 +93,6 @@ def handle_db_errors(func: Callable):
     return wrapper
 
 
-# Alias for backward compatibility during migration
-handle_netbox_errors = handle_db_errors
-
-
 def handle_concurrent_modification():
     """Context manager to handle concurrent modification detection."""
     class ConcurrentModificationHandler:
@@ -230,7 +226,3 @@ def db_operation(operation_name: str, threshold_ms: int = 1000, max_retries: int
         return decorated_func
 
     return decorator
-
-
-# Alias for backward compatibility
-netbox_operation = db_operation

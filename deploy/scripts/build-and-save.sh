@@ -74,10 +74,9 @@ if [ $? -eq 0 ]; then
 
 ## Environment Variables Required
 \`\`\`
-# NetBox Connection (Required)
-NETBOX_URL=https://your-netbox-instance.com
-NETBOX_TOKEN=your-api-token-here
-NETBOX_SSL_VERIFY=true
+# MongoDB Connection (Required)
+MONGODB_URL=mongodb://user:pass@mongodb-host:27017
+MONGODB_DB_NAME=vlan_manager
 
 # Site Configuration (Required)
 SITES=site1,site2,site3

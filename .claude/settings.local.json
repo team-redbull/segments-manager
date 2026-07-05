@@ -74,8 +74,6 @@
       "Bash(podman push:*)",
       "Bash(podman logout:*)",
       "Bash(tree -L 3 -I \".venv|__pycache__|*.pyc|.git\" /home/roi/Documents/scripts/segments_2)",
-      "Bash(export NETBOX_URL=\"https://azcw9322.cloud.netboxapp.com\":*)",
-      "Bash(export NETBOX_TOKEN=\"3287cf1aa0c1afa5224a1651b9d6a9f14be68a97\")",
       "Bash(timeout 120 python -m pytest:*)",
       "Bash(tree:*)",
       "Bash(vlan-manager:ui-test)",

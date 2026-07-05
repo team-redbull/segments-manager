@@ -19,8 +19,12 @@
 2. Configuration Summary:
    - Sites: {{ .Values.config.sites }}
    - Site Prefixes: {{ .Values.config.sitePrefixes }}
-   - NetBox URL: {{ .Values.netbox.url }}
-   - NetBox SSL Verify: {{ .Values.netbox.sslVerify }}
+   - MongoDB Database: {{ .Values.mongodb.dbName }}
+   {{- if .Values.mongodb.existingSecret }}
+   - MongoDB URL: (from existing secret "{{ .Values.mongodb.existingSecret }}")
+   {{- else }}
+   - MongoDB URL: (from generated secret "{{ include "vlan-manager.fullname" . }}-mongodb")
+   {{- end }}
 
 3. Features Available:
    ✓ Site-specific IP prefix validation

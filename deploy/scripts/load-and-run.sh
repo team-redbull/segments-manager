@@ -40,10 +40,9 @@ else
     echo "⚠️  No .env file found. Using default environment variables."
     echo "   Create .env from .env.example for production use"
     
-    # Set defaults (WARNING: These won't work without NetBox)
-    export NETBOX_URL="${NETBOX_URL:-https://your-netbox-instance.com}"
-    export NETBOX_TOKEN="${NETBOX_TOKEN:-your-api-token-here}"
-    export NETBOX_SSL_VERIFY="${NETBOX_SSL_VERIFY:-true}"
+    # Set defaults (WARNING: MONGODB_URL must point at a reachable MongoDB)
+    export MONGODB_URL="${MONGODB_URL:-mongodb://localhost:27017}"
+    export MONGODB_DB_NAME="${MONGODB_DB_NAME:-vlan_manager}"
     export SITES="${SITES:-site1,site2,site3}"
     export SITE_PREFIXES="${SITE_PREFIXES:-site1:192,site2:193,site3:194}"
     export SERVER_HOST="${SERVER_HOST:-0.0.0.0}"
@@ -53,10 +52,11 @@ fi
 
 echo ""
 echo "🔧 Environment Configuration:"
-echo "   NetBox URL: $NETBOX_URL"
+echo "   MongoDB DB: $MONGODB_DB_NAME"
 echo "   Sites: $SITES"
 echo "   Site Prefixes: $SITE_PREFIXES"
-echo "   NetBox Token: $(echo $NETBOX_TOKEN | sed 's/./*/g')"
+# Mask credentials in the connection string before printing
+echo "   MongoDB URL: $(echo "$MONGODB_URL" | sed -E 's#://[^@]*@#://****:****@#')"
 
 echo ""
 echo "📥 Loading container image..."
@@ -81,9 +81,8 @@ podman run -d \
     --name $CONTAINER_NAME \
     --restart unless-stopped \
     -p 8000:8000 \
-    -e NETBOX_URL="$NETBOX_URL" \
-    -e NETBOX_TOKEN="$NETBOX_TOKEN" \
-    -e NETBOX_SSL_VERIFY="$NETBOX_SSL_VERIFY" \
+    -e MONGODB_URL="$MONGODB_URL" \
+    -e MONGODB_DB_NAME="$MONGODB_DB_NAME" \
     -e SITES="$SITES" \
     -e SITE_PREFIXES="$SITE_PREFIXES" \
     -e SERVER_HOST="$SERVER_HOST" \
@@ -123,8 +122,8 @@ if [ $? -eq 0 ]; then
         
         echo ""
         echo "🔍 Troubleshooting:"
-        echo "   1. Check NetBox connectivity and URL"
-        echo "   2. Verify NETBOX_TOKEN is valid"
+        echo "   1. Check MongoDB connectivity (MONGODB_URL reachable from the container)"
+        echo "   2. Verify MongoDB credentials in MONGODB_URL are valid"
         echo "   3. Verify all environment variables are set (especially SITES and SITE_PREFIXES)"
         echo "   4. Check container logs: podman logs $CONTAINER_NAME"
     fi
