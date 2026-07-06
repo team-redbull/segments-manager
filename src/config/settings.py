@@ -86,29 +86,47 @@ def get_site_prefix(site: str) -> str:
 
 
 # Logging Configuration
+# Path to the rotating log file. Defaults to the current directory for local
+# runs; in the container it is set to a writable location (see Dockerfile /
+# Helm), because the app runs as a non-root user that cannot write to /app.
+LOG_FILE = os.getenv("LOG_FILE", "vlan_manager.log")
+
+
 def setup_logging():
-    """Configure logging for the application with rotation."""
+    """Configure logging with a stdout handler and a rotating file handler.
+
+    File logging is best-effort: if the log file cannot be opened (e.g. the
+    non-root container user lacks write permission on the target directory),
+    the app logs a warning and continues with stdout only instead of crashing.
+    """
     from logging.handlers import RotatingFileHandler
 
     log_level_str = os.getenv("LOG_LEVEL", "INFO").upper()
     log_level = getattr(logging, log_level_str, logging.INFO)
+    log_format = '%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] %(funcName)s() - %(message)s'
 
-    rotating_handler = RotatingFileHandler(
-        'vlan_manager.log',
-        maxBytes=50 * 1024 * 1024,
-        backupCount=5,
-        encoding='utf-8'
-    )
+    handlers = [logging.StreamHandler(sys.stdout)]
+    file_handler_error = None
+    try:
+        handlers.append(RotatingFileHandler(
+            LOG_FILE,
+            maxBytes=50 * 1024 * 1024,
+            backupCount=5,
+            encoding='utf-8'
+        ))
+    except OSError as e:  # includes PermissionError
+        file_handler_error = e
 
-    logging.basicConfig(
-        level=log_level,
-        format='%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] %(funcName)s() - %(message)s',
-        handlers=[
-            logging.StreamHandler(sys.stdout),
-            rotating_handler
-        ]
-    )
-    return logging.getLogger(__name__)
+    logging.basicConfig(level=log_level, format=log_format, handlers=handlers)
+    logger = logging.getLogger(__name__)
+
+    if file_handler_error is not None:
+        logger.warning(
+            f"File logging disabled: could not open log file '{LOG_FILE}' "
+            f"({file_handler_error}). Logging to stdout only. "
+            f"Set LOG_FILE to a writable path to enable file logging and the /api/logs endpoint."
+        )
+    return logger
 
 
 # Server Configuration

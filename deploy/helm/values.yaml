@@ -16,22 +16,14 @@ replicaCount: 1
 podAnnotations: {}
 podLabels: {}
 
-# Security context - runs as non-root user (no anyuid SCC needed)
-podSecurityContext:
-  runAsNonRoot: true
-  runAsUser: 1001
-  runAsGroup: 1001
-  fsGroup: 1001
+# Security context.
+# Left empty so the container runs as the image default (root, UID 0), which
+# can write /app/vlan_manager.log. To run as a non-root user instead, populate
+# these blocks (e.g. runAsNonRoot: true / runAsUser: 1001) AND set LOG_FILE to a
+# writable path such as /app/data/vlan_manager.log.
+podSecurityContext: {}
 
-securityContext:
-  allowPrivilegeEscalation: false
-  readOnlyRootFilesystem: false
-  runAsNonRoot: true
-  runAsUser: 1001
-  runAsGroup: 1001
-  capabilities:
-    drop:
-    - ALL
+securityContext: {}
 
 # Service configuration
 service:
