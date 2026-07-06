@@ -9,7 +9,7 @@ from typing import Optional
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase, AsyncIOMotorCollection
 from fastapi import HTTPException
 
-from ..config.settings import MONGODB_URL, MONGODB_DB_NAME
+from ..config.settings import MONGODB_URL, MONGODB_DB_NAME, MONGODB_TLS_INSECURE
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +20,17 @@ _db: Optional[AsyncIOMotorDatabase] = None
 async def init_mongo_client() -> None:
     """Connect to MongoDB and verify the connection with a ping."""
     global _motor_client, _db
-    _motor_client = AsyncIOMotorClient(MONGODB_URL)
+    client_kwargs = {}
+    if MONGODB_TLS_INSECURE:
+        # Equivalent of "verify: false" — keep TLS encryption but skip
+        # server certificate / hostname verification.
+        client_kwargs["tls"] = True
+        client_kwargs["tlsAllowInvalidCertificates"] = True
+        logger.warning(
+            "MONGODB_TLS_INSECURE is enabled — connecting to MongoDB WITHOUT "
+            "TLS certificate verification. Do not use this in production."
+        )
+    _motor_client = AsyncIOMotorClient(MONGODB_URL, **client_kwargs)
     # Ping verifies the connection is reachable before we proceed
     await _motor_client.admin.command("ping")
     _db = _motor_client[MONGODB_DB_NAME]

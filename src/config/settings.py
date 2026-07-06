@@ -6,6 +6,14 @@ import sys
 MONGODB_URL = os.getenv("MONGODB_URL")
 MONGODB_DB_NAME = os.getenv("MONGODB_DB_NAME", "vlan_manager")
 
+# When true, skip TLS certificate verification for the MongoDB connection
+# (equivalent to "verify: false"). Keeps the connection encrypted but does not
+# validate the server certificate/CA — useful for Atlas or self-hosted Mongo
+# where the CA chain is unavailable. Do NOT enable in production if avoidable.
+MONGODB_TLS_INSECURE = os.getenv("MONGODB_TLS_INSECURE", "false").strip().lower() in (
+    "true", "1", "yes", "on",
+)
+
 if not MONGODB_URL:
     error_msg = (
         "CRITICAL CONFIGURATION ERROR: MONGODB_URL environment variable is not set!\n"
