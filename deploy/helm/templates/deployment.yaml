@@ -77,12 +77,22 @@ spec:
                 configMapKeyRef:
                   name: {{ include "vlan-manager.fullname" . }}
                   key: LOG_LEVEL
-            # MongoDB database name from ConfigMap
+            - name: LOG_FILE
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "vlan-manager.fullname" . }}
+                  key: LOG_FILE
+            # MongoDB config from ConfigMap
             - name: MONGODB_DB_NAME
               valueFrom:
                 configMapKeyRef:
                   name: {{ include "vlan-manager.fullname" . }}
                   key: MONGODB_DB_NAME
+            - name: MONGODB_TLS_INSECURE
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "vlan-manager.fullname" . }}
+                  key: MONGODB_TLS_INSECURE
             # MongoDB URL from Secret
             - name: MONGODB_URL
               valueFrom:

@@ -52,6 +52,10 @@ config:
   serverHost: "0.0.0.0"
   serverPort: "8000"
   logLevel: "INFO"
+  # Rotating log file path. The default works when running as root (the chart
+  # default). If you switch to a non-root securityContext, point this at a
+  # writable directory such as /app/data/vlan_manager.log.
+  logFile: "vlan_manager.log"
 
 # MongoDB Configuration
 mongodb:
@@ -61,6 +65,12 @@ mongodb:
 
   # Database name (optional, default: vlan_manager)
   dbName: "vlan_manager"
+
+  # Skip TLS certificate verification (keeps the connection encrypted but does
+  # NOT validate the server certificate/CA). Equivalent to "verify: false".
+  # Useful for Atlas / self-hosted Mongo without a trusted CA chain.
+  # Leave false in production if avoidable.
+  tlsInsecure: false
 
   # Use existing secret for MongoDB URL (optional)
   existingSecret: ""
