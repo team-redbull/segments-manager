@@ -251,11 +251,7 @@ Icon?
 Thumbs.db
 *.orig
 
-# Test files
-test_*.py
-*_test.py
-tests/
-pytest.ini
+# Test artifacts (the tests/ suite itself IS tracked)
 tox.ini
 
 # Coverage reports

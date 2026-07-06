@@ -146,10 +146,21 @@ curl -u admin:admin -X POST http://localhost:8000/api/allocate-vlan \
 
 ## 🧪 Testing
 
+Integration tests run against a **live server** (see [`tests/README.md`](tests/README.md)).
+
 ```bash
-pytest tests/test_api.py -v      # integration tests (server must be running)
-python test_comprehensive.py     # comprehensive validation tests
+pip install pytest requests
+
+# Against a locally running server (http://127.0.0.1:8000)
+pytest tests/ -v
+
+# Against a different target
+VLAN_MANAGER_URL=http://host:8000 pytest tests/ -v
 ```
+
+The suite skips (rather than fails) if the server is unreachable, and cleans up
+every segment and allocation it creates. To run against the container image with
+a throwaway MongoDB, see [`tests/README.md`](tests/README.md).
 
 ---
 

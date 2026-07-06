@@ -47,13 +47,18 @@ class NetworkValidators:
                     detail=f"Invalid network format. Segment must include subnet mask (e.g., '{segment}/24')"
                 )
 
-            # Then validate that the segment is in proper network format
+            # Then validate that the segment is in proper network format.
+            # ip_network(strict=True) raises a plain ValueError when host bits
+            # are set (e.g. "192.168.1.5/24") — which is NOT an AddressValueError,
+            # so we must catch ValueError here.
             try:
                 ipaddress.ip_network(segment, strict=True)
-            except ipaddress.AddressValueError:
-                # If strict parsing fails, get the correct network address
-                network_loose = ipaddress.ip_network(segment, strict=False)
-                correct_format = str(network_loose)
+            except ValueError:
+                try:
+                    correct_format = str(ipaddress.ip_network(segment, strict=False))
+                except ValueError:
+                    logger.warning(f"Invalid IP network format: {segment}")
+                    raise HTTPException(status_code=400, detail="Invalid IP network format")
                 raise HTTPException(
                     status_code=400,
                     detail=f"Invalid network format. Use network address '{correct_format}' instead of '{segment}'"
@@ -71,7 +76,7 @@ class NetworkValidators:
                            f"Expected to start with '{expected_prefix}', got '{first_octet}'"
                 )
 
-        except ipaddress.AddressValueError:
+        except ValueError:
             logger.warning(f"Invalid IP network format: {segment}")
             raise HTTPException(status_code=400, detail="Invalid IP network format")
 

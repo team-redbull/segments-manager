@@ -47,10 +47,18 @@ SITE_PREFIXES="site1:192,site2:193,site3:194"      # site:first-octet — every 
 
 ### Testing
 
+Integration tests in `tests/` run against a **live server** over HTTP (they skip
+if it's unreachable, and clean up everything they create). See `tests/README.md`.
+
 ```bash
-pytest tests/test_api.py -v          # integration tests (require running server on :8000)
-python test_comprehensive.py         # comprehensive validation tests
+pip install pytest requests
+pytest tests/ -v                                   # target http://127.0.0.1:8000
+VLAN_MANAGER_URL=http://host:8000 pytest tests/ -v # target elsewhere
 ```
+
+The server under test must be configured with `SITES=site1,site2,site3` and
+`SITE_PREFIXES=site1:192,site2:193,site3:194`. To test the container image, run a
+throwaway MongoDB + the image on a shared podman network (see `tests/README.md`).
 
 ### Container Deployment (Podman)
 
