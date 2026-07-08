@@ -6,8 +6,8 @@ fullnameOverride: ""
 
 # Image configuration
 image:
-  repository: vlan-manager
-  tag: v2.0.0
+  repository: ghcr.io/team-redbull/segments-manager
+  tag: feature-mongodb-no-vrf-3cf08aa
   pullPolicy: IfNotPresent
   pullSecrets: []
 
