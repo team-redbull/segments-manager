@@ -6,8 +6,8 @@ fullnameOverride: ""
 
 # Image configuration
 image:
-  repository: segments-manager
-  tag: v2.0.0
+  repository: ghcr.io/team-redbull/segments-manager
+  tag: refactor-segments-manager-016b698
   pullPolicy: IfNotPresent
   pullSecrets: []
 
