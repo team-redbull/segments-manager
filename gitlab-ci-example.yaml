@@ -15,10 +15,10 @@
 #
 # Features:
 # - Detects new cluster creation from file changes
-# - Automatically allocates VLAN from VLAN Manager API
+# - Automatically allocates VLAN from Segments Manager API
 # - Updates cluster YAML with vlanId field
 # - Commits changes back to the same branch
-# - Graceful degradation if VLAN Manager is unavailable
+# - Graceful degradation if Segments Manager is unavailable
 # - Respects "AutomateVlanAllocation: false" flag in cluster YAML
 # - Prevents infinite loops with [vlan-bot] and [skip ci] tags
 # - Only runs on Merge Requests (not on branch pushes)
@@ -29,10 +29,10 @@ stages:
   - deploy
 
 variables:
-  # VLAN Manager Configuration
-  VLAN_MANAGER_URL: "${VLAN_MANAGER_URL:-http://vlan-manager:8000}"
-  VLAN_MANAGER_TIMEOUT: "10"  # Timeout in seconds
-  VLAN_MANAGER_RETRIES: "2"   # Number of retry attempts
+  # Segments Manager Configuration
+  SEGMENTS_MANAGER_URL: "${SEGMENTS_MANAGER_URL:-http://segments-manager:8000}"
+  SEGMENTS_MANAGER_TIMEOUT: "10"  # Timeout in seconds
+  SEGMENTS_MANAGER_RETRIES: "2"   # Number of retry attempts
 
   # VRF Configuration (REQUIRED: Set as CI/CD variable in GitLab)
   # Examples: "Network1", "Network2", "Network3"

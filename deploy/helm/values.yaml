@@ -1,4 +1,4 @@
-# VLAN Manager Helm Chart Values
+# Segments Manager Helm Chart Values
 
 # Global configuration
 nameOverride: ""
@@ -6,7 +6,7 @@ fullnameOverride: ""
 
 # Image configuration
 image:
-  repository: vlan-manager
+  repository: segments-manager
   tag: v2.0.0
   pullPolicy: IfNotPresent
   pullSecrets: []
@@ -18,9 +18,9 @@ podLabels: {}
 
 # Security context.
 # Left empty so the container runs as the image default (root, UID 0), which
-# can write /app/vlan_manager.log. To run as a non-root user instead, populate
+# can write /app/segments_manager.log. To run as a non-root user instead, populate
 # these blocks (e.g. runAsNonRoot: true / runAsUser: 1001) AND set LOG_FILE to a
-# writable path such as /app/data/vlan_manager.log.
+# writable path such as /app/data/segments_manager.log.
 podSecurityContext: {}
 
 securityContext: {}
@@ -54,8 +54,8 @@ config:
   logLevel: "INFO"
   # Rotating log file path. The default works when running as root (the chart
   # default). If you switch to a non-root securityContext, point this at a
-  # writable directory such as /app/data/vlan_manager.log.
-  logFile: "vlan_manager.log"
+  # writable directory such as /app/data/segments_manager.log.
+  logFile: "segments_manager.log"
 
 # MongoDB Configuration
 mongodb:
@@ -63,8 +63,8 @@ mongodb:
   # Example: mongodb://user:pass@mongodb:27017 or mongodb+srv://... for Atlas
   url: "mongodb://localhost:27017"
 
-  # Database name (optional, default: vlan_manager)
-  dbName: "vlan_manager"
+  # Database name (optional, default: segments_manager)
+  dbName: "segments_manager"
 
   # Skip TLS certificate verification (keeps the connection encrypted but does
   # NOT validate the server certificate/CA). Equivalent to "verify: false".

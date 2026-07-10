@@ -1,4 +1,4 @@
-"""VLAN Manager — MongoDB integration test suite.
+"""Segments Manager — MongoDB integration test suite.
 
 Runs against a live server. See conftest.py for configuration.
 
@@ -55,7 +55,7 @@ class TestRemovedEndpoints:
 class TestAuthRequired:
     def test_create_requires_auth(self):
         v = next_vlan()
-        body = {"site": "site1", "vlan_id": v, "epg_name": _uid(),
+        body = {"type": "MCE", "site": "site1", "vlan_id": v, "epg_name": _uid(),
                 "segment": cidr_for("site1", v), "dhcp": False}
         assert requests.post(f"{API}/segments", json=body, timeout=TIMEOUT).status_code == 401
 
@@ -109,6 +109,51 @@ class TestSegmentValidation:
 
 
 # ---------------------------------------------------------------------------
+# Segment type (MCE / INVENTORY / HC / PXE)
+# ---------------------------------------------------------------------------
+class TestSegmentType:
+    def test_each_valid_type_accepted(self, segment_factory):
+        for t in ("MCE", "INVENTORY", "HC", "PXE"):
+            v = next_vlan()
+            r = segment_factory(type=t, site="site1", vlan_id=v, epg_name=_uid(),
+                                segment=cidr_for("site1", v))
+            assert r.status_code == 200, r.text
+            got = requests.get(f"{API}/segments/{r.json()['id']}", timeout=TIMEOUT)
+            assert got.json()["type"] == t
+
+    def test_invalid_type_rejected(self, segment_factory):
+        v = next_vlan()
+        r = segment_factory(type="BOGUS", site="site1", vlan_id=v, epg_name=_uid(),
+                            segment=cidr_for("site1", v))
+        assert r.status_code == 422
+
+    def test_missing_type_defaults_to_hc(self):
+        v = next_vlan()
+        body = {"site": "site1", "vlan_id": v, "epg_name": _uid(),
+                "segment": cidr_for("site1", v), "dhcp": False}
+        r = requests.post(f"{API}/segments", json=body, auth=AUTH, timeout=TIMEOUT)
+        assert r.status_code == 200, r.text
+
+        got = requests.get(f"{API}/segments/{r.json()['id']}", timeout=TIMEOUT)
+        assert got.json()["type"] == "HC"
+
+    def test_get_segments_filters_by_type(self, segment_factory):
+        v = next_vlan()
+        r = segment_factory(type="PXE", site="site1", vlan_id=v, epg_name=_uid(),
+                            segment=cidr_for("site1", v))
+        sid = r.json()["id"]
+
+        matching = requests.get(f"{API}/segments", params={"site": "site1", "type": "PXE"},
+                                timeout=TIMEOUT)
+        assert matching.status_code == 200
+        assert any(s["_id"] == sid for s in matching.json())
+
+        non_matching = requests.get(f"{API}/segments", params={"site": "site1", "type": "HC"},
+                                    timeout=TIMEOUT)
+        assert not any(s["_id"] == sid for s in non_matching.json())
+
+
+# ---------------------------------------------------------------------------
 # CRUD
 # ---------------------------------------------------------------------------
 class TestSegmentCRUD:
@@ -145,7 +190,7 @@ class TestSegmentCRUD:
         sid = r.json()["id"]
 
         new_epg = _uid("UPD")
-        body = {"site": "site1", "vlan_id": v, "epg_name": new_epg,
+        body = {"type": "MCE", "site": "site1", "vlan_id": v, "epg_name": new_epg,
                 "segment": seg, "dhcp": True, "description": "updated"}
         u = requests.put(f"{API}/segments/{sid}", json=body, auth=AUTH, timeout=TIMEOUT)
         assert u.status_code == 200, u.text
@@ -224,6 +269,116 @@ class TestAllocation:
                           json={"cluster_name": f"nope-{uuid.uuid4().hex[:6]}", "site": "site1"},
                           auth=AUTH, timeout=TIMEOUT)
         assert r.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Locking (segments start locked; excluded from auto-allocation until unlocked)
+# ---------------------------------------------------------------------------
+class TestSegmentLocking:
+    def test_new_segment_defaults_locked(self, segment_factory):
+        v = next_vlan()
+        r = segment_factory(site="site1", vlan_id=v, epg_name=_uid(), segment=cidr_for("site1", v),
+                            keep_locked=True)
+        assert r.status_code == 200, r.text
+        sid = r.json()["id"]
+
+        got = requests.get(f"{API}/segments/{sid}", timeout=TIMEOUT)
+        assert got.status_code == 200
+        assert got.json()["locked"] is True
+
+    def test_locked_segment_excluded_from_allocation(self, segment_factory, release_cluster):
+        # Create one locked segment and confirm the atomic allocator never
+        # hands it out — it skips straight past to an unlocked candidate.
+        v = next_vlan()
+        r = segment_factory(site="site3", vlan_id=v, epg_name=_uid(), segment=cidr_for("site3", v),
+                            keep_locked=True)
+        assert r.status_code == 200, r.text
+        locked_segment_value = cidr_for("site3", v)
+
+        cluster = f"it-locktest-{uuid.uuid4().hex[:6]}"
+        release_cluster(cluster, "site3")
+
+        a1 = requests.post(f"{API}/allocate-vlan",
+                           json={"cluster_name": cluster, "site": "site3"},
+                           auth=AUTH, timeout=TIMEOUT)
+        assert a1.status_code == 200, a1.text
+        assert a1.json()["segment"] != locked_segment_value
+
+    def test_unlock_makes_segment_allocatable(self, segment_factory, release_cluster):
+        v = next_vlan()
+        r = segment_factory(site="site1", vlan_id=v, epg_name=_uid(), segment=cidr_for("site1", v),
+                            keep_locked=True)
+        assert r.status_code == 200, r.text
+        sid = r.json()["id"]
+
+        unlock = requests.post(f"{API}/segments/{sid}/unlock", auth=AUTH, timeout=TIMEOUT)
+        assert unlock.status_code == 200, unlock.text
+
+        got = requests.get(f"{API}/segments/{sid}", timeout=TIMEOUT)
+        assert got.json()["locked"] is False
+
+        cluster = f"it-unlocktest-{uuid.uuid4().hex[:6]}"
+        release_cluster(cluster, "site1")
+        alloc = requests.post(f"{API}/allocate-vlan",
+                              json={"cluster_name": cluster, "site": "site1"},
+                              auth=AUTH, timeout=TIMEOUT)
+        assert alloc.status_code == 200, alloc.text
+
+    def test_unlock_idempotent(self, segment_factory):
+        v = next_vlan()
+        r = segment_factory(site="site2", vlan_id=v, epg_name=_uid(), segment=cidr_for("site2", v),
+                            keep_locked=True)
+        sid = r.json()["id"]
+
+        first = requests.post(f"{API}/segments/{sid}/unlock", auth=AUTH, timeout=TIMEOUT)
+        second = requests.post(f"{API}/segments/{sid}/unlock", auth=AUTH, timeout=TIMEOUT)
+        assert first.status_code == 200
+        assert second.status_code == 200
+
+    def test_unlock_requires_auth(self, segment_factory):
+        v = next_vlan()
+        r = segment_factory(site="site1", vlan_id=v, epg_name=_uid(), segment=cidr_for("site1", v),
+                            keep_locked=True)
+        sid = r.json()["id"]
+
+        unauth = requests.post(f"{API}/segments/{sid}/unlock", timeout=TIMEOUT)
+        assert unauth.status_code == 401
+
+    def test_no_relock_endpoint_exists(self, segment_factory):
+        # Segment lifecycle is one-way: locked -> available -> allocated -> available.
+        # There must be no API surface that can set locked back to True.
+        v = next_vlan()
+        r = segment_factory(site="site1", vlan_id=v, epg_name=_uid(), segment=cidr_for("site1", v))
+        sid = r.json()["id"]
+
+        old_lock_route = requests.put(f"{API}/segments/{sid}/lock", json={"locked": True},
+                                      auth=AUTH, timeout=TIMEOUT)
+        assert old_lock_route.status_code == 404
+
+        # The general segment-update endpoint must not be able to re-lock either.
+        seg = requests.get(f"{API}/segments/{sid}", timeout=TIMEOUT).json()
+        update = requests.put(f"{API}/segments/{sid}", auth=AUTH, timeout=TIMEOUT, json={
+            "type": seg.get("type", "MCE"), "site": seg["site"], "vlan_id": seg["vlan_id"],
+            "epg_name": seg["epg_name"], "segment": seg["segment"], "dhcp": seg["dhcp"],
+            "description": seg.get("description", ""),
+            "locked": True,
+        })
+        assert update.status_code in (400, 422)
+
+    def test_get_segments_filters_by_locked(self, segment_factory):
+        v = next_vlan()
+        r = segment_factory(site="site1", vlan_id=v, epg_name=_uid(), segment=cidr_for("site1", v),
+                            keep_locked=True)
+        sid = r.json()["id"]
+
+        locked_only = requests.get(f"{API}/segments", params={"site": "site1", "locked": "true"},
+                                   timeout=TIMEOUT)
+        assert locked_only.status_code == 200
+        assert any(s["_id"] == sid for s in locked_only.json())
+
+        unlocked_only = requests.get(f"{API}/segments", params={"site": "site1", "locked": "false"},
+                                     timeout=TIMEOUT)
+        assert not any(s["_id"] == sid for s in unlocked_only.json())
 
 
 # ---------------------------------------------------------------------------

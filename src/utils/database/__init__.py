@@ -1,4 +1,4 @@
-"""Database utilities module for VLAN Manager.
+"""Database utilities module for Segments Manager.
 
 This module provides a unified DatabaseUtils class that aggregates all database operations
 from specialized utility modules. This maintains backward compatibility with existing code.

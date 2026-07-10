@@ -9,7 +9,7 @@ from src.config.settings import setup_logging, SERVER_HOST, SERVER_PORT
 
 # Setup logging
 logger = setup_logging()
-logger.info("Starting VLAN Manager server...")
+logger.info("Starting Segments Manager server...")
 
 # Start the server
 uvicorn.run(

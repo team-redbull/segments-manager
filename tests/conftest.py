@@ -1,9 +1,9 @@
-"""Shared pytest fixtures for VLAN Manager integration tests.
+"""Shared pytest fixtures for Segments Manager integration tests.
 
 These tests run against a LIVE server (local `python main.py` or the
 container image). Configure the target with environment variables:
 
-    VLAN_MANAGER_URL   base URL (default: http://127.0.0.1:8000)
+    SEGMENTS_MANAGER_URL   base URL (default: http://127.0.0.1:8000)
     VLAN_AUTH_USER     basic-auth user (default: admin)
     VLAN_AUTH_PASS     basic-auth pass (default: admin)
 
@@ -19,7 +19,7 @@ import itertools
 import pytest
 import requests
 
-BASE_URL = os.getenv("VLAN_MANAGER_URL", "http://127.0.0.1:8000").rstrip("/")
+BASE_URL = os.getenv("SEGMENTS_MANAGER_URL", "http://127.0.0.1:8000").rstrip("/")
 API = f"{BASE_URL}/api"
 AUTH = (os.getenv("VLAN_AUTH_USER", "admin"), os.getenv("VLAN_AUTH_PASS", "admin"))
 TIMEOUT = 15
@@ -48,10 +48,10 @@ def _require_server():
     try:
         r = requests.get(f"{API}/health", timeout=TIMEOUT)
     except requests.RequestException as e:
-        pytest.skip(f"VLAN Manager not reachable at {BASE_URL}: {e}")
+        pytest.skip(f"Segments Manager not reachable at {BASE_URL}: {e}")
         return
     if r.status_code != 200:
-        pytest.skip(f"VLAN Manager health check returned {r.status_code}")
+        pytest.skip(f"Segments Manager health check returned {r.status_code}")
 
 
 @pytest.fixture
@@ -72,14 +72,26 @@ def segment_factory():
         r = segment_factory(site="site1", vlan_id=..., epg_name=..., segment=...)
     Returns the raw `requests.Response`. Any segment that was successfully
     created (HTTP 200 with an id) is deleted during teardown.
+
+    New segments start locked (excluded from auto-allocation) by default, so
+    this factory unlocks them right after creation unless `keep_locked=True`
+    is passed — most tests expect an immediately-allocatable segment.
     """
     created_ids = []
 
     def _create(**body):
+        keep_locked = body.pop("keep_locked", False)
         body.setdefault("dhcp", False)
         r = requests.post(f"{API}/segments", json=body, auth=AUTH, timeout=TIMEOUT)
         if r.status_code == 200 and "id" in r.json():
-            created_ids.append(r.json()["id"])
+            sid = r.json()["id"]
+            created_ids.append(sid)
+            if not keep_locked:
+                requests.post(
+                    f"{API}/segments/{sid}/unlock",
+                    auth=AUTH,
+                    timeout=TIMEOUT,
+                )
         return r
 
     yield _create

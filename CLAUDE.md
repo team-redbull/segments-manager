@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**VLAN Manager** is a production-grade network VLAN allocation and management system. It provides an intelligent API layer and web UI for allocating VLAN segments to clusters across multiple sites, with comprehensive validation. Segments are stored in **MongoDB**.
+**Segments Manager** is a production-grade network VLAN allocation and management system. It provides an intelligent API layer and web UI for allocating VLAN segments to clusters across multiple sites, with comprehensive validation. Segments are stored in **MongoDB**.
 
 **Type**: FastAPI Web Application + REST API
 **Primary Language**: Python 3.11
@@ -40,7 +40,7 @@ python main.py            # serves http://localhost:8000
 
 ```bash
 MONGODB_URL="mongodb://localhost:27017"          # or mongodb+srv://... for Atlas — REQUIRED (fail-fast if unset)
-MONGODB_DB_NAME="vlan_manager"                    # optional, default: vlan_manager
+MONGODB_DB_NAME="segments_manager"                    # optional, default: segments_manager
 SITES="site1,site2,site3"                          # comma-separated site names
 SITE_PREFIXES="site1:192,site2:193,site3:194"      # site:first-octet — every site in SITES MUST have an entry
 ```
@@ -53,7 +53,7 @@ if it's unreachable, and clean up everything they create). See `tests/README.md`
 ```bash
 pip install pytest requests
 pytest tests/ -v                                   # target http://127.0.0.1:8000
-VLAN_MANAGER_URL=http://host:8000 pytest tests/ -v # target elsewhere
+SEGMENTS_MANAGER_URL=http://host:8000 pytest tests/ -v # target elsewhere
 ```
 
 The server under test must be configured with `SITES=site1,site2,site3` and
@@ -79,7 +79,7 @@ Chart in `deploy/helm/`. Set `mongodb.url` (stored in a generated Secret) or poi
 
 ```
 ┌─────────────────────────────────────────────┐
-│                VLAN Manager                  │
+│                Segments Manager                  │
 │  API + Business Logic + Validation + Web UI  │
 └───────────────────────┬──────────────────────┘
                         │ Motor (async)
@@ -163,6 +163,7 @@ Collection: **`segments`**
 ```python
 {
     "_id":          ObjectId,        # returned to callers as str
+    "type":         str,             # "MCE" | "INVENTORY" | "HC" | "PXE", defaults to "HC"
     "site":         str,             # e.g. "site1"
     "vlan_id":      int,             # 1–4094
     "epg_name":     str,
@@ -173,8 +174,13 @@ Collection: **`segments`**
     "allocated_at": datetime | None,
     "released":     bool,
     "released_at":  datetime | None,
+    "locked":       bool,            # default True on creation; excluded from auto-allocation until unlocked
 }
 ```
+
+> **`type` is one of `MCE`, `INVENTORY`, `HC`, `PXE`**, enforced by a Pydantic `Literal` on the `Segment` model (422 on any other value). Optional — defaults to `"HC"` if omitted on create or update. It's a plain classifier with no lifecycle logic attached, unlike `locked`.
+
+> **Locked is the default state for new segments.** Lifecycle is one-way: `Locked → Available → Allocated → Available` — a segment can never become locked again via the API (no re-lock endpoint exists). It signals that firewall rules haven't been opened yet. `allocate_segment()` excludes locked segments (`locked: {"$ne": True}`). An external service unlocks a segment via `POST /api/segments/{id}/unlock` (no body) once provisioning is done. Documents created before this field existed have no `locked` key — treated as unlocked (`False`) everywhere for backward compatibility.
 
 **Indexes** (created in `init_storage()`):
 - `unique({site: 1, vlan_id: 1})` — one VLAN ID per site
@@ -249,4 +255,4 @@ VLAN uniqueness is enforced both at the app level (`check_vlan_exists(site, vlan
 
 ---
 
-**Maintainer**: VLAN Manager Team
+**Maintainer**: Segments Manager Team

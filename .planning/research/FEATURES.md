@@ -6,7 +6,7 @@
 
 ## Context
 
-The VLAN Manager has a validation layer split across 5 modules (~700+ lines) in `src/utils/validators/`. The team wants to reduce friction for internal operators by relaxing overly strict validators. This document categorizes every validator as KEEP, RELAX, or REMOVE, with specific rationale grounded in network engineering conventions and the "NetBox is source of truth" principle.
+The Segments Manager has a validation layer split across 5 modules (~700+ lines) in `src/utils/validators/`. The team wants to reduce friction for internal operators by relaxing overly strict validators. This document categorizes every validator as KEEP, RELAX, or REMOVE, with specific rationale grounded in network engineering conventions and the "NetBox is source of truth" principle.
 
 ---
 
@@ -20,7 +20,7 @@ These validators protect data integrity in NetBox. Removing them risks corruptin
 | `validate_vrf` | organization_validators | Async check that VRF exists in NetBox. Without this, segments get created referencing non-existent VRFs, causing lookup failures. | Low |
 | `validate_vlan_id` | input_validators | Range 1-4094 is IEEE 802.1Q spec. Pydantic already enforces `ge=1, le=4094` on the model, but the explicit validator adds a VLAN 1 warning (reserved). NetBox also enforces VID range. | Low |
 | `validate_segment_format` | network_validators | Validates CIDR format, strict network address (not host address), and site-prefix enforcement. This is core business logic -- site1 must use 192.x.x.x. NetBox does NOT enforce this mapping. | Low |
-| `validate_ip_overlap` | network_validators | Prevents overlapping subnets within the same scope. NetBox has optional overlap detection but VLAN Manager enforces stricter per-VRF+site rules. Critical for data integrity. | Low |
+| `validate_ip_overlap` | network_validators | Prevents overlapping subnets within the same scope. NetBox has optional overlap detection but Segments Manager enforces stricter per-VRF+site rules. Critical for data integrity. | Low |
 | `validate_vlan_name_uniqueness` | organization_validators | Prevents EPG name conflicts within the same (VRF, site) scope. This is business logic NetBox does not enforce natively (NetBox enforces uniqueness within VLAN Groups, but the mapping is app-managed). | Low |
 | `validate_segment_not_allocated` | organization_validators | Prevents deleting segments that are in use. Pure business rule, not enforced by NetBox. | Low |
 | `validate_object_id` | input_validators | Basic null/empty check on IDs before database lookups. Prevents unnecessary API calls. | Low |

@@ -3,491 +3,317 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>VLAN Manager - Help & Documentation</title>
+    <meta name="color-scheme" content="dark">
+    <title>Segments Manager — Help &amp; Documentation</title>
     <link rel="stylesheet" href="/static/css/styles.css">
-    <style>
-        .help-container {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 20px;
-        }
-        .help-section {
-            background: var(--card-background);
-            margin: 20px 0;
-            padding: 25px;
-            border-radius: 12px;
-            border-left: 4px solid var(--primary-color);
-        }
-        .help-section h2 {
-            color: var(--primary-color);
-            margin-top: 0;
-            font-size: 1.5rem;
-        }
-        .help-section h3 {
-            color: var(--text-color);
-            margin-top: 25px;
-            font-size: 1.2rem;
-        }
-        .code-block {
-            background: var(--background-color);
-            border: 1px solid var(--border-color);
-            border-radius: 6px;
-            padding: 15px;
-            margin: 10px 0;
-            font-family: 'Courier New', monospace;
-            overflow-x: auto;
-        }
-        .endpoint {
-            background: #f8f9fa;
-            border-left: 4px solid #28a745;
-            padding: 10px 15px;
-            margin: 10px 0;
-            border-radius: 4px;
-        }
-        .method {
-            display: inline-block;
-            padding: 2px 8px;
-            border-radius: 4px;
-            font-weight: bold;
-            font-size: 0.8rem;
-            margin-right: 10px;
-        }
-        .method.get { background: #007bff; color: white; }
-        .method.post { background: #28a745; color: white; }
-        .method.put { background: #ffc107; color: black; }
-        .method.delete { background: #dc3545; color: white; }
-        .example {
-            background: #f8f9fa;
-            border: 1px solid #dee2e6;
-            border-radius: 6px;
-            padding: 15px;
-            margin: 10px 0;
-            color: #333;
-        }
-        .warning {
-            background: #fff3cd;
-            border: 1px solid #ffeaa7;
-            border-radius: 6px;
-            padding: 15px;
-            margin: 10px 0;
-            border-left: 4px solid #ffc107;
-            color: #333;
-        }
-        .code-block {
-            color: #333;
-        }
-        .endpoint {
-            color: #333;
-        }
-        
-        /* Dark mode styles */
-        [data-theme="dark"] .example {
-            background: #2d3748;
-            border-color: #4a5568;
-            color: #e2e8f0;
-        }
-        [data-theme="dark"] .warning {
-            background: #744210;
-            border-color: #d69e2e;
-            color: #fed7aa;
-        }
-        [data-theme="dark"] .code-block {
-            background: #1a202c;
-            border-color: #4a5568;
-            color: #e2e8f0;
-        }
-        [data-theme="dark"] .endpoint {
-            background: #2d3748;
-            border-left-color: #28a745;
-            color: #e2e8f0;
-        }
-        [data-theme="dark"] .help-section {
-            background: var(--card-background);
-            color: var(--text-color);
-        }
-        [data-theme="dark"] .help-section h2 {
-            color: var(--primary-color);
-        }
-        [data-theme="dark"] .help-section h3 {
-            color: var(--text-color);
-        }
-        [data-theme="dark"] .toc {
-            background: var(--card-background);
-            border-color: var(--border-color);
-            color: var(--text-color);
-        }
-        
-        /* Button Styles - borrowed from main page */
-        .btn {
-            padding: 10px 20px;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-            font-size: 14px;
-            font-weight: 500;
-            transition: all 0.2s ease;
-            text-decoration: none;
-            display: inline-block;
-        }
-        
-        .btn-primary {
-            background: #667eea;
-            color: white;
-        }
-        
-        .btn-primary:hover {
-            background: #5a6fd8;
-            transform: translateY(-1px);
-            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
-        }
-        
-        .btn-secondary {
-            background: #f7f7f7;
-            color: #333;
-            border: 1px solid #ddd;
-        }
-        
-        .btn-secondary:hover {
-            background: #f9f9f9;
-            transform: translateY(-1px);
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-        }
-        
-        [data-theme="dark"] .btn-secondary {
-            background: #4a5568;
-            color: #e2e8f0;
-            border-color: #6b7280;
-        }
-        
-        [data-theme="dark"] .btn-secondary:hover {
-            background: #6b7280;
-            color: #f7fafc;
-        }
-        
-        .back-link {
-            margin: 20px 0;
-        }
-        
-        .toc a {
-            color: var(--primary-color);
-            text-decoration: none;
-            padding: 4px 8px;
-            border-radius: 4px;
-            transition: all 0.2s ease;
-        }
-        .toc a:hover {
-            background: rgba(102, 126, 234, 0.1);
-            transform: translateX(5px);
-        }
-        [data-theme="dark"] .toc a:hover {
-            background: rgba(102, 126, 234, 0.2);
-        }
-        .toc {
-            background: var(--card-background);
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            padding: 20px;
-            margin: 20px 0;
-        }
-        .toc ul {
-            list-style: none;
-            padding-left: 0;
-        }
-        .toc li {
-            margin: 8px 0;
-        }
-        .toc a {
-            color: var(--primary-color);
-            text-decoration: none;
-        }
-        .toc a:hover {
-            text-decoration: underline;
-        }
-    </style>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%232563eb' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='2' y='2' width='20' height='8' rx='2'/%3E%3Crect x='2' y='14' width='20' height='8' rx='2'/%3E%3Cline x1='6' y1='6' x2='6.01' y2='6'/%3E%3Cline x1='6' y1='18' x2='6.01' y2='18'/%3E%3C/svg%3E">
 </head>
 <body>
-    <div class="theme-toggle" id="themeToggle">
-        <span class="theme-icon" id="themeIcon">🌙</span>
-        <span id="themeText">Dark</span>
-    </div>
-    
-    <div class="help-container">
-        <div class="back-link">
-            <a href="/" class="btn btn-secondary">&larr; Back to VLAN Manager</a>
+    <header class="app-header">
+        <div class="app-header__inner">
+            <div class="brand">
+                <span class="brand__mark" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" class="icon"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
+                </span>
+                <span class="brand__text">
+                    <span class="brand__title">Segments Manager</span>
+                    <span class="brand__subtitle">Help &amp; documentation</span>
+                </span>
+            </div>
+            <div class="app-header__actions">
+                <a href="/" class="btn btn-secondary">
+                    <svg viewBox="0 0 24 24" class="icon icon-sm"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+                    Back to dashboard
+                </a>
+            </div>
         </div>
+    </header>
 
-        <h1>🌐 VLAN Segment Manager - Help & Documentation</h1>
-        
-        <div class="toc">
-            <h3>Table of Contents</h3>
+    <main class="doc">
+        <h1>
+            <svg viewBox="0 0 24 24" class="icon" style="width:28px;height:28px;color:var(--primary)"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+            Help &amp; Documentation
+        </h1>
+
+        <nav class="doc-toc" aria-label="Table of contents">
+            <h2>On this page</h2>
             <ul>
                 <li><a href="#overview">Overview</a></li>
-                <li><a href="#core-concepts">Core Concepts</a></li>
-                <li><a href="#ui-guide">User Interface Guide</a></li>
-                <li><a href="#shared-segments">Shared Segments</a></li>
-                <li><a href="#api-reference">API Reference</a></li>
+                <li><a href="#core-concepts">Core concepts</a></li>
+                <li><a href="#ui-guide">Interface guide</a></li>
+                <li><a href="#shared-segments">Shared segments</a></li>
+                <li><a href="#api-reference">API reference</a></li>
                 <li><a href="#examples">Examples</a></li>
                 <li><a href="#troubleshooting">Troubleshooting</a></li>
             </ul>
-        </div>
+        </nav>
 
-        <div class="help-section" id="overview">
-            <h2>📋 Overview</h2>
-            <p>The VLAN Segment Manager is a comprehensive tool for managing network VLAN segments across multiple sites. It supports automatic allocation, manual management, and advanced features like shared segments where multiple clusters can use the same VLAN.</p>
-            
-            <h3>Key Features</h3>
+        <section class="doc-section" id="overview">
+            <h2>
+                <svg viewBox="0 0 24 24" class="icon"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                Overview
+            </h2>
+            <p>Segments Manager is a tool for managing network VLAN segments across multiple sites. It supports automatic allocation via the API, a read-only dashboard for visibility, and shared segments where multiple clusters can use the same VLAN.</p>
+
+            <h3>Key features</h3>
             <ul>
-                <li><strong>Multi-Site Support:</strong> Manage VLANs across different sites (site1, site2, site3)</li>
-                <li><strong>DHCP Configuration:</strong> Enable/disable DHCP per segment for IP management</li>
-                <li><strong>MongoDB Backend:</strong> Segments stored in MongoDB with atomic allocation</li>
-                <li><strong>Flexible Subnets:</strong> Support for all subnet sizes (/16 to /29)</li>
-                <li><strong>Automatic Allocation:</strong> Automatically find and allocate available segments</li>
-                <li><strong>Shared Segments:</strong> Multiple clusters can share the same VLAN segment</li>
-                <li><strong>Manual Management:</strong> Create, edit, and delete segments manually</li>
-                <li><strong>Export Capabilities:</strong> Export data to CSV and Excel formats</li>
-                <li><strong>Real-time Search:</strong> Search segments by cluster, EPG, VLAN, or segment</li>
-                <li><strong>High Performance:</strong> 70-90% reduction in API calls through aggressive caching</li>
+                <li><strong>Multi-site support</strong> — manage VLANs across different sites (site1, site2, site3).</li>
+                <li><strong>DHCP configuration</strong> — enable/disable DHCP per segment.</li>
+                <li><strong>MongoDB backend</strong> — segments stored in MongoDB with atomic allocation.</li>
+                <li><strong>Flexible subnets</strong> — support for a range of subnet sizes.</li>
+                <li><strong>Automatic allocation</strong> — find and allocate available segments programmatically.</li>
+                <li><strong>Shared segments</strong> — multiple clusters can share the same VLAN segment.</li>
+                <li><strong>Read-only dashboard</strong> — the web UI is a live view; creation, allocation, and edits happen via the API.</li>
+                <li><strong>Export</strong> — download data as CSV or Excel.</li>
+                <li><strong>Real-time search</strong> — search by cluster, EPG, VLAN, or segment.</li>
             </ul>
-        </div>
+        </section>
 
-        <div class="help-section" id="core-concepts">
-            <h2>🧠 Core Concepts</h2>
-            
+        <section class="doc-section" id="core-concepts">
+            <h2>
+                <svg viewBox="0 0 24 24" class="icon"><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2z"/><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2z"/></svg>
+                Core concepts
+            </h2>
+
             <h3>Sites</h3>
-            <p>The system manages three sites, each with specific IP prefix requirements:</p>
+            <p>The system manages three sites, each with a required IP prefix:</p>
             <ul>
-                <li><strong>site1:</strong> Segments must start with 192.x.x.x</li>
-                <li><strong>site2:</strong> Segments must start with 193.x.x.x</li>
-                <li><strong>site3:</strong> Segments must start with 194.x.x.x</li>
+                <li><strong>site1</strong> — segments must start with <code>192.x.x.x</code></li>
+                <li><strong>site2</strong> — segments must start with <code>193.x.x.x</code></li>
+                <li><strong>site3</strong> — segments must start with <code>194.x.x.x</code></li>
             </ul>
 
-            <h3>Segment States</h3>
+            <h3>Segment types</h3>
+            <p>Every segment has a <code>type</code>, one of <code>MCE</code>, <code>INVENTORY</code>, <code>HC</code>, <code>PXE</code>. Optional — defaults to <code>HC</code> if omitted when creating or updating a segment.</p>
+
+            <h3>Segment states</h3>
+            <p>Segment lifecycle: <code>Locked → Available → Allocated → Available</code>. Locking is one-way — once unlocked, a segment can never become locked again via the API.</p>
             <ul>
-                <li><strong>Available:</strong> Segment is created but not allocated to any cluster</li>
-                <li><strong>Allocated:</strong> Segment is assigned to one or more clusters</li>
-                <li><strong>Released:</strong> Segment was previously allocated but is now available again</li>
+                <li><strong>Locked</strong> — the default state for a newly-created segment. Firewall rules for the segment have not been opened yet, so it's excluded from automatic allocation. An external service unlocks it via <code>POST /api/segments/{id}/unlock</code> once provisioning is complete.</li>
+                <li><strong>Available</strong> — unlocked and not allocated to any cluster.</li>
+                <li><strong>Allocated</strong> — assigned to one or more clusters.</li>
+                <li><strong>Released</strong> — previously allocated, now available again (not re-locked).</li>
             </ul>
 
-            <h3>Allocation Logic</h3>
+            <h3>Allocation logic</h3>
             <p>When allocating a segment for a cluster:</p>
             <ol>
-                <li>Check if the cluster already has a segment at the site</li>
-                <li>Check if the cluster is part of a shared segment</li>
-                <li>If not found, allocate the first available segment</li>
-                <li>If no segments available, return an error</li>
+                <li>Check if the cluster already has a segment at the site.</li>
+                <li>Check if the cluster is part of a shared segment.</li>
+                <li>If not found, allocate the first available <strong>unlocked</strong> segment.</li>
+                <li>If no unlocked segments are available, return an error.</li>
             </ol>
-        </div>
+        </section>
 
-        <div class="help-section" id="ui-guide">
-            <h2>🖥️ User Interface Guide</h2>
+        <section class="doc-section" id="ui-guide">
+            <h2>
+                <svg viewBox="0 0 24 24" class="icon"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+                Interface guide
+            </h2>
 
-            <h3>Main Dashboard</h3>
-            <p>The main page provides an overview of segment statistics per site and access to all management functions.</p>
+            <h3>Main dashboard</h3>
+            <p>The web UI is a <strong>read-only</strong> visualization of the segments stored in MongoDB. It shows per-site statistics and the full segments table, with search, status filters (All / Available / Allocated), and a site filter.</p>
 
-            <h3>Adding Segments</h3>
-            <ol>
-                <li>Select the target site from the dropdown</li>
-                <li>Enter a unique VLAN ID (1-4094)</li>
-                <li>Provide an EPG (Endpoint Group) name</li>
-                <li>Enter the network segment (must match site prefix, e.g., 192.168.1.0/24)</li>
-                <li>Enable/disable DHCP as needed</li>
-                <li>Add an optional description</li>
-                <li>Click "Add Segment"</li>
-            </ol>
-
-            <h3>Allocating Segments</h3>
-            <ol>
-                <li>Enter the cluster name</li>
-                <li>Select the site</li>
-                <li>Click "Allocate Segment"</li>
-                <li>The system will automatically find and allocate an available segment at the specified site</li>
-            </ol>
-
-            <h3>Managing Segments</h3>
-            <p>In the segments table, you can:</p>
+            <h3>Exporting data</h3>
             <ul>
-                <li><strong>Edit:</strong> Click the Edit button to modify segment details or cluster assignments</li>
-                <li><strong>Release:</strong> Click the Release button to free up an allocated segment</li>
-                <li><strong>Delete:</strong> Remove segments that are not allocated</li>
-                <li><strong>Search:</strong> Use the search bar to find specific segments</li>
-                <li><strong>Filter:</strong> Use tabs to filter by status (All/Available/Allocated)</li>
+                <li><strong>CSV / Excel</strong> — download the currently filtered segments list.</li>
+                <li><strong>Stats</strong> — download per-site utilization statistics as CSV.</li>
             </ul>
-        </div>
 
-        <div class="help-section" id="shared-segments">
-            <h2>🤝 Shared Segments</h2>
+            <h3>Creating, allocating, editing, or deleting segments</h3>
+            <p>These operations aren't available from the UI. Use the REST API directly — see the <a href="#api-reference">API reference</a> and <a href="#examples">examples</a> below.</p>
+        </section>
+
+        <section class="doc-section" id="shared-segments">
+            <h2>
+                <svg viewBox="0 0 24 24" class="icon"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+                Shared segments
+            </h2>
             <p>Shared segments allow multiple clusters to use the same VLAN, which is useful for clusters that need to communicate on the same network segment.</p>
 
-            <h3>Creating Shared Segments</h3>
+            <h3>Creating shared segments</h3>
+            <p>Use the API to set multiple cluster names on a segment:</p>
             <ol>
-                <li>Click "Edit" on any segment (allocated or available)</li>
-                <li>In the "Cluster Name(s)" field, enter multiple cluster names separated by commas</li>
-                <li>Example: <code>cluster1,cluster2,cluster3</code></li>
-                <li>Click "Update Segment"</li>
+                <li>Call <code>PUT /api/segments/{id}/clusters</code></li>
+                <li>Set <code>cluster_names</code> to a comma-separated list, e.g. <code>cluster1,cluster2,cluster3</code></li>
             </ol>
 
-            <h3>Managing Shared Segments</h3>
+            <h3>Managing shared segments</h3>
             <ul>
-                <li><strong>Add clusters:</strong> Edit the segment and add more cluster names</li>
-                <li><strong>Remove clusters:</strong> Edit and remove specific cluster names from the list</li>
-                <li><strong>Release segment:</strong> Leave the cluster field empty to release all allocations</li>
+                <li><strong>Add clusters</strong> — call the endpoint again with more cluster names.</li>
+                <li><strong>Remove clusters</strong> — call the endpoint again with specific cluster names removed.</li>
+                <li><strong>Release segment</strong> — send an empty <code>cluster_names</code> value to release all allocations.</li>
             </ul>
 
             <div class="example">
-                <h4>Example Scenarios:</h4>
+                <h4>Example scenarios</h4>
                 <ul>
-                    <li><strong>Single to Shared:</strong> <code>cluster1</code> → <code>cluster1,cluster2</code></li>
-                    <li><strong>Add to Shared:</strong> <code>cluster1,cluster2</code> → <code>cluster1,cluster2,cluster3</code></li>
-                    <li><strong>Remove from Shared:</strong> <code>cluster1,cluster2,cluster3</code> → <code>cluster1,cluster2</code></li>
-                    <li><strong>Release All:</strong> <code>cluster1,cluster2</code> → <em>(empty)</em></li>
+                    <li><strong>Single to shared:</strong> <code>cluster1</code> → <code>cluster1,cluster2</code></li>
+                    <li><strong>Add to shared:</strong> <code>cluster1,cluster2</code> → <code>cluster1,cluster2,cluster3</code></li>
+                    <li><strong>Remove from shared:</strong> <code>cluster1,cluster2,cluster3</code> → <code>cluster1,cluster2</code></li>
+                    <li><strong>Release all:</strong> <code>cluster1,cluster2</code> → <em>(empty)</em></li>
                 </ul>
             </div>
 
-            <div class="warning">
-                <strong>Note:</strong> When using the API to release a single cluster from a shared segment, only that specific cluster is removed. Other clusters continue to use the segment.
+            <div class="callout">
+                <svg viewBox="0 0 24 24" class="icon icon-sm"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                <span><strong>Note:</strong> When using the API to release a single cluster from a shared segment, only that specific cluster is removed. Other clusters continue to use the segment.</span>
             </div>
-        </div>
+        </section>
 
-        <div class="help-section" id="api-reference">
-            <h2>🔌 API Reference</h2>
-            <p>All API endpoints use JSON for request/response data and are prefixed with <code>/api</code>.</p>
+        <section class="doc-section" id="api-reference">
+            <h2>
+                <svg viewBox="0 0 24 24" class="icon"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+                API reference
+            </h2>
+            <p>All endpoints use JSON and are prefixed with <code>/api</code>.</p>
 
-            <h3>Segment Management</h3>
-            
+            <h3>Segment management</h3>
             <div class="endpoint">
                 <span class="method get">GET</span>
-                <strong>/api/segments</strong> - Get all segments
-                <div class="code-block">
-Query Parameters:
+                <span class="endpoint__path">/api/segments</span>
+                <span class="endpoint__desc">— Get all segments</span>
+            </div>
+            <div class="code-block">Query parameters:
 - site (optional): Filter by site
 - allocated (optional): Filter by allocation status (true/false)
-</div>
-            </div>
+- locked (optional): Filter by lock status (true/false)
+- type (optional): Filter by segment type (MCE/INVENTORY/HC/PXE)</div>
 
             <div class="endpoint">
                 <span class="method post">POST</span>
-                <strong>/api/segments</strong> - Create a new segment
-                <div class="code-block">
-{
+                <span class="endpoint__path">/api/segments</span>
+                <span class="endpoint__desc">— Create a new segment</span>
+            </div>
+            <div class="code-block">{
+  "type": "MCE",
   "site": "site1",
   "vlan_id": 100,
   "epg_name": "EPG_PROD_01",
   "segment": "192.168.1.0/24",
   "dhcp": false,
   "description": "Production segment"
-}
-</div>
+}</div>
+            <div class="callout">
+                <svg viewBox="0 0 24 24" class="icon icon-sm"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                <span><strong>Note:</strong> New segments always start <code>locked: true</code> and are excluded from allocation until unlocked — see <code>POST /api/segments/{id}/unlock</code> below. Locking is one-way; there is no endpoint to re-lock a segment. <code>type</code> is optional and defaults to <code>HC</code> if omitted.</span>
+            </div>
+
+            <div class="endpoint">
+                <span class="method post">POST</span>
+                <span class="endpoint__path">/api/segments/{id}/unlock</span>
+                <span class="endpoint__desc">— Unlock a segment (no request body)</span>
             </div>
 
             <div class="endpoint">
                 <span class="method get">GET</span>
-                <strong>/api/segments/{id}</strong> - Get specific segment
+                <span class="endpoint__path">/api/segments/{id}</span>
+                <span class="endpoint__desc">— Get a specific segment</span>
             </div>
 
             <div class="endpoint">
                 <span class="method put">PUT</span>
-                <strong>/api/segments/{id}</strong> - Update segment
-                <div class="code-block">
-{
+                <span class="endpoint__path">/api/segments/{id}</span>
+                <span class="endpoint__desc">— Update a segment</span>
+            </div>
+            <div class="code-block">{
+  "type": "MCE",
   "site": "site1",
   "vlan_id": 100,
   "epg_name": "EPG_UPDATED",
   "segment": "192.168.1.0/24",
   "dhcp": true,
   "description": "Updated description"
-}
-</div>
-            </div>
+}</div>
 
             <div class="endpoint">
                 <span class="method put">PUT</span>
-                <strong>/api/segments/{id}/clusters</strong> - Update cluster assignment
-                <div class="code-block">
-{
-  "cluster_names": "cluster1,cluster2,cluster3"
-}
-</div>
+                <span class="endpoint__path">/api/segments/{id}/clusters</span>
+                <span class="endpoint__desc">— Update cluster assignment</span>
             </div>
+            <div class="code-block">{
+  "cluster_names": "cluster1,cluster2,cluster3"
+}</div>
 
             <div class="endpoint">
                 <span class="method delete">DELETE</span>
-                <strong>/api/segments/{id}</strong> - Delete segment (only if not allocated)
+                <span class="endpoint__path">/api/segments/{id}</span>
+                <span class="endpoint__desc">— Delete a segment (only if not allocated)</span>
             </div>
 
-            <h3>VLAN Allocation</h3>
+            <h3>VLAN allocation</h3>
+            <div class="endpoint">
+                <span class="method post">POST</span>
+                <span class="endpoint__path">/api/allocate-vlan</span>
+                <span class="endpoint__desc">— Allocate a segment for a cluster</span>
+            </div>
+            <div class="code-block">{
+  "cluster_name": "my-cluster",
+  "site": "site1"
+}</div>
 
             <div class="endpoint">
                 <span class="method post">POST</span>
-                <strong>/api/allocate-vlan</strong> - Allocate segment for cluster
-                <div class="code-block">
-{
+                <span class="endpoint__path">/api/release-vlan</span>
+                <span class="endpoint__desc">— Release a cluster's segment</span>
+            </div>
+            <div class="code-block">{
   "cluster_name": "my-cluster",
   "site": "site1"
-}
-</div>
-            </div>
+}</div>
 
-            <div class="endpoint">
-                <span class="method post">POST</span>
-                <strong>/api/release-vlan</strong> - Release cluster's segment
-                <div class="code-block">
-{
-  "cluster_name": "my-cluster",
-  "site": "site1"
-}
-</div>
-            </div>
-
-            <h3>Statistics & Information</h3>
-
+            <h3>Statistics &amp; information</h3>
             <div class="endpoint">
                 <span class="method get">GET</span>
-                <strong>/api/stats</strong> - Get site statistics
+                <span class="endpoint__path">/api/stats</span>
+                <span class="endpoint__desc">— Per-site statistics</span>
             </div>
-
             <div class="endpoint">
                 <span class="method get">GET</span>
-                <strong>/api/sites</strong> - Get available sites
+                <span class="endpoint__path">/api/sites</span>
+                <span class="endpoint__desc">— Available sites</span>
             </div>
-
             <div class="endpoint">
                 <span class="method get">GET</span>
-                <strong>/api/health</strong> - Health check with MongoDB connectivity
+                <span class="endpoint__path">/api/health</span>
+                <span class="endpoint__desc">— Health check with MongoDB connectivity</span>
             </div>
 
-            <h3>Search & Export</h3>
-
+            <h3>Search &amp; export</h3>
             <div class="endpoint">
                 <span class="method get">GET</span>
-                <strong>/api/segments/search</strong> - Search segments
-                <div class="code-block">
-Query Parameters:
+                <span class="endpoint__path">/api/segments/search</span>
+                <span class="endpoint__desc">— Search segments</span>
+            </div>
+            <div class="code-block">Query parameters:
 - q: Search query (cluster, EPG, VLAN ID, description, or segment)
 - site (optional): Filter by site
-- allocated (optional): Filter by allocation status
-</div>
-            </div>
+- allocated (optional): Filter by allocation status</div>
 
             <div class="endpoint">
                 <span class="method get">GET</span>
-                <strong>/api/export/segments/csv</strong> - Export segments as CSV
+                <span class="endpoint__path">/api/export/segments/csv</span>
+                <span class="endpoint__desc">— Export segments as CSV</span>
             </div>
-
             <div class="endpoint">
                 <span class="method get">GET</span>
-                <strong>/api/export/segments/excel</strong> - Export segments as Excel
+                <span class="endpoint__path">/api/export/segments/excel</span>
+                <span class="endpoint__desc">— Export segments as Excel</span>
             </div>
-        </div>
+        </section>
 
-        <div class="help-section" id="examples">
-            <h2>💡 Examples</h2>
+        <section class="doc-section" id="examples">
+            <h2>
+                <svg viewBox="0 0 24 24" class="icon"><line x1="9" y1="18" x2="15" y2="18"/><line x1="10" y1="22" x2="14" y2="22"/><path d="M15.09 14c.18-.98.65-1.74 1.41-2.5A4.65 4.65 0 0 0 18 8 6 6 0 0 0 6 8c0 1 .23 2.23 1.5 3.5A4.61 4.61 0 0 1 8.91 14"/></svg>
+                Examples
+            </h2>
 
-            <h3>Example 1: Create and Allocate a Segment</h3>
-            <div class="code-block">
-# 1. Create a new segment
-curl -X POST "http://localhost:8000/api/segments" \
+            <h3>Create and allocate a segment</h3>
+            <div class="code-block"># 1. Create a new segment (starts locked)
+curl -u admin:admin -X POST "http://localhost:8000/api/segments" \
   -H "Content-Type: application/json" \
   -d '{
+    "type": "MCE",
     "site": "site1",
     "vlan_id": 150,
     "epg_name": "EPG_WEB",
@@ -495,19 +321,21 @@ curl -X POST "http://localhost:8000/api/segments" \
     "dhcp": false,
     "description": "Web servers segment"
   }'
+# -> {"message": "Segment created", "id": "..."}
 
-# 2. Allocate it to a cluster
-curl -X POST "http://localhost:8000/api/allocate-vlan" \
+# 2. Unlock it once firewall rules are open (locked segments can't be allocated)
+curl -u admin:admin -X POST "http://localhost:8000/api/segments/{id}/unlock"
+
+# 3. Allocate it to a cluster
+curl -u admin:admin -X POST "http://localhost:8000/api/allocate-vlan" \
   -H "Content-Type: application/json" \
   -d '{
     "cluster_name": "web-cluster",
     "site": "site1"
-  }'
-</div>
+  }'</div>
 
-            <h3>Example 2: Create Shared Segment</h3>
-            <div class="code-block">
-# 1. First allocate to one cluster
+            <h3>Create a shared segment</h3>
+            <div class="code-block"># 1. First allocate to one cluster
 curl -X POST "http://localhost:8000/api/allocate-vlan" \
   -H "Content-Type: application/json" \
   -d '{
@@ -520,105 +348,47 @@ curl -X PUT "http://localhost:8000/api/segments/{segment_id}/clusters" \
   -H "Content-Type: application/json" \
   -d '{
     "cluster_names": "frontend,backend,database"
-  }'
-</div>
+  }'</div>
 
-            <h3>Example 3: Search Segments</h3>
-            <div class="code-block">
-# Search for segments containing "web"
+            <h3>Search segments</h3>
+            <div class="code-block"># Search for segments containing "web"
 curl "http://localhost:8000/api/segments/search?q=web"
 
 # Search allocated segments in site1
-curl "http://localhost:8000/api/segments/search?q=cluster&site=site1&allocated=true"
-</div>
-        </div>
+curl "http://localhost:8000/api/segments/search?q=cluster&site=site1&allocated=true"</div>
+        </section>
 
-        <div class="help-section" id="troubleshooting">
-            <h2>🔧 Troubleshooting</h2>
+        <section class="doc-section" id="troubleshooting">
+            <h2>
+                <svg viewBox="0 0 24 24" class="icon"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+                Troubleshooting
+            </h2>
 
-            <h3>Common Issues</h3>
-
-            <h4>VLAN ID Already Exists</h4>
+            <h4>VLAN ID already exists</h4>
             <p><strong>Error:</strong> "VLAN X already exists for site Y"</p>
             <p><strong>Solution:</strong> Each VLAN ID must be unique within a site. Choose a different VLAN ID or edit the existing segment.</p>
 
-            <h4>Invalid IP Prefix</h4>
+            <h4>Invalid IP prefix</h4>
             <p><strong>Error:</strong> "Invalid IP prefix for site. Expected to start with X"</p>
-            <p><strong>Solution:</strong> Ensure your segment starts with the correct prefix for the site:</p>
-            <ul>
-                <li>site1: 192.x.x.x</li>
-                <li>site2: 193.x.x.x</li>
-                <li>site3: 194.x.x.x</li>
-            </ul>
+            <p><strong>Solution:</strong> Ensure your segment starts with the correct prefix — site1: <code>192.x.x.x</code>, site2: <code>193.x.x.x</code>, site3: <code>194.x.x.x</code>.</p>
 
-            <h4>No Available Segments</h4>
+            <h4>No available segments</h4>
             <p><strong>Error:</strong> "No available segments"</p>
             <p><strong>Solution:</strong> Create new segments for the site or release existing allocated segments.</p>
 
-            <h4>Cannot Delete Allocated Segment</h4>
+            <h4>Cannot delete allocated segment</h4>
             <p><strong>Error:</strong> Segment deletion fails</p>
             <p><strong>Solution:</strong> Release the segment first, then delete it.</p>
 
-            <h3>Best Practices</h3>
+            <h3>Best practices</h3>
             <ul>
-                <li>Use descriptive EPG names and descriptions</li>
-                <li>Plan your VLAN ID ranges per site to avoid conflicts</li>
-                <li>Use shared segments sparingly and document which clusters share them</li>
-                <li>Regularly export data for backup purposes</li>
-                <li>Monitor the statistics to track utilization</li>
+                <li>Use descriptive EPG names and descriptions.</li>
+                <li>Plan your VLAN ID ranges per site to avoid conflicts.</li>
+                <li>Use shared segments sparingly and document which clusters share them.</li>
+                <li>Regularly export data for backup purposes.</li>
+                <li>Monitor the statistics to track utilization.</li>
             </ul>
-
-            <h3>Support</h3>
-            <p>For additional support or to report issues:</p>
-            <ul>
-                <li>Check the application logs for detailed error messages</li>
-                <li>Use the health endpoint to verify system status</li>
-                <li>Consult the API reference for correct request formats</li>
-            </ul>
-        </div>
-
-        <div class="back-link">
-            <a href="/" class="btn btn-secondary">&larr; Back to VLAN Manager</a>
-        </div>
-    </div>
-
-    <script>
-        // Theme management for help page
-        let isDarkMode = localStorage.getItem('darkMode') === 'true';
-
-        function initTheme() {
-            const themeToggle = document.getElementById('themeToggle');
-            const themeIcon = document.getElementById('themeIcon');
-            const themeText = document.getElementById('themeText');
-            
-            // Apply saved theme or default to light
-            applyTheme(isDarkMode);
-            
-            // Theme toggle click handler
-            themeToggle.addEventListener('click', () => {
-                isDarkMode = !isDarkMode;
-                applyTheme(isDarkMode);
-                localStorage.setItem('darkMode', isDarkMode.toString());
-            });
-        }
-
-        function applyTheme(darkMode) {
-            const themeIcon = document.getElementById('themeIcon');
-            const themeText = document.getElementById('themeText');
-            
-            if (darkMode) {
-                document.documentElement.setAttribute('data-theme', 'dark');
-                themeIcon.textContent = '☀️';
-                themeText.textContent = 'Light';
-            } else {
-                document.documentElement.removeAttribute('data-theme');
-                themeIcon.textContent = '🌙';
-                themeText.textContent = 'Dark';
-            }
-        }
-
-        // Initialize theme when page loads
-        document.addEventListener('DOMContentLoaded', initTheme);
-    </script>
+        </section>
+    </main>
 </body>
 </html>

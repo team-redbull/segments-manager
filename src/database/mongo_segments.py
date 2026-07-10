@@ -33,6 +33,8 @@ def _segment_matches(
     allocated: Optional[bool],
     cluster_name: Optional[str],
     released: Optional[bool],
+    locked: Optional[bool] = None,
+    type: Optional[str] = None,
 ) -> bool:
     """Return True if segment satisfies all non-None filter criteria."""
     if site is not None and segment.get("site", "").lower() != site.lower():
@@ -46,6 +48,10 @@ def _segment_matches(
     if cluster_name is not None and segment.get("cluster_name") != cluster_name:
         return False
     if released is not None and segment.get("released", False) != released:
+        return False
+    if locked is not None and bool(segment.get("locked", False)) != locked:
+        return False
+    if type is not None and str(segment.get("type", "")).lower() != type.lower():
         return False
     return True
 
@@ -90,12 +96,14 @@ async def get_segments(
     allocated: Optional[bool] = None,
     cluster_name: Optional[str] = None,
     released: Optional[bool] = None,
+    locked: Optional[bool] = None,
+    type: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """Return segments matching all provided filter criteria."""
     all_segments = await _fetch_all_segments()
     return [
         s for s in all_segments
-        if _segment_matches(s, site, vlan_id, allocated, cluster_name, released)
+        if _segment_matches(s, site, vlan_id, allocated, cluster_name, released, locked, type)
     ]
 
 
@@ -117,6 +125,9 @@ async def create_segment(document: Dict[str, Any]) -> Dict[str, Any]:
     doc.setdefault("allocated_at", None)
     doc.setdefault("released", False)
     doc.setdefault("released_at", None)
+    # New segments start locked (firewall rules not yet open) until an external
+    # service unlocks them via PUT /segments/{id}/lock — see AllocationService.
+    doc.setdefault("locked", True)
 
     result = await col.insert_one(doc)
     invalidate_cache(CACHE_KEY_SEGMENTS)
@@ -162,7 +173,11 @@ async def allocate_segment(
 
     col = get_segments_collection()
 
-    query = {"site": {"$regex": f"^{site}$", "$options": "i"}, "cluster_name": None}
+    query = {
+        "site": {"$regex": f"^{site}$", "$options": "i"},
+        "cluster_name": None,
+        "locked": {"$ne": True},
+    }
     sort = [("vlan_id", 1)] if sort_by_vlan_id else None
     update = {
         "$set": {

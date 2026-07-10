@@ -1,16 +1,16 @@
 #!/bin/bash
 
-# VLAN Manager - Build and Save Container Image
+# Segments Manager - Build and Save Container Image
 # This script builds the container image and saves it for air-gapped deployment
 
 set -e
 
-PROJECT_NAME="vlan-manager"
-IMAGE_NAME="vlan-manager"
+PROJECT_NAME="segments-manager"
+IMAGE_NAME="segments-manager"
 IMAGE_TAG="${1:-latest}"
 SAVE_DIR="$(dirname "$0")/../images"
 
-echo "🏗️  VLAN Manager - Build and Save Container Image"
+echo "🏗️  Segments Manager - Build and Save Container Image"
 echo "=================================================="
 
 # Check if podman is available
@@ -76,7 +76,7 @@ if [ $? -eq 0 ]; then
 \`\`\`
 # MongoDB Connection (Required)
 MONGODB_URL=mongodb://user:pass@mongodb-host:27017
-MONGODB_DB_NAME=vlan_manager
+MONGODB_DB_NAME=segments_manager
 
 # Site Configuration (Required)
 SITES=site1,site2,site3

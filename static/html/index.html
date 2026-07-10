@@ -3,193 +3,138 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>VLAN Manager</title>
+    <meta name="color-scheme" content="dark">
+    <title>Segments Manager</title>
     <link rel="stylesheet" href="/static/css/styles.css">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%232563eb' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='2' y='2' width='20' height='8' rx='2'/%3E%3Crect x='2' y='14' width='20' height='8' rx='2'/%3E%3Cline x1='6' y1='6' x2='6.01' y2='6'/%3E%3Cline x1='6' y1='18' x2='6.01' y2='18'/%3E%3C/svg%3E">
 </head>
 <body>
-    <div class="theme-toggle" id="themeToggle">
-        <span class="theme-icon" id="themeIcon">🌙</span>
-        <span id="themeText">Dark</span>
-    </div>
-    
-    <div class="container">
-        <div class="header-bar">
-            <h1 style="margin: 0;">🌐 VLAN Segment Manager</h1>
-            <div class="header-actions">
-                <button id="loginBtn" class="btn btn-primary" style="display: none;">
-                    🔐 Login
-                </button>
-                <div id="authSection" style="display: none;">
-                    <span id="userGreeting" style="color: white; margin-right: 10px; font-size: 14px;"></span>
-                    <button id="logoutBtn" class="btn btn-secondary">Logout</button>
-                </div>
+    <header class="app-header">
+        <div class="app-header__inner">
+            <div class="brand">
+                <span class="brand__mark" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" class="icon"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
+                </span>
+                <span class="brand__text">
+                    <span class="brand__title">Segments Manager</span>
+                </span>
             </div>
-        </div>
-        
-        <!-- Login Modal -->
-        <div id="loginModal" class="modal" style="display: none;">
-            <div class="modal-content login-modal-content">
-                <div class="modal-header">
-                    <h2>🔐 Login</h2>
-                    <button class="close-modal" onclick="closeLoginModal()">&times;</button>
-                </div>
-                <form id="loginForm">
-                    <p style="margin-bottom: 20px; color: var(--text-secondary); text-align: center;">
-                        Login to create, update, or delete segments
-                    </p>
-                    <div class="form-group">
-                        <label for="loginUsername">Username</label>
-                        <input type="text" id="loginUsername" placeholder="Enter username" required autofocus>
-                    </div>
-                    <div class="form-group">
-                        <label for="loginPassword">Password</label>
-                        <input type="password" id="loginPassword" placeholder="Enter password" required>
-                    </div>
-                    <div id="loginError" class="error-banner" style="display: none; margin-bottom: 15px;"></div>
-                    <div style="display: flex; gap: 10px;">
-                        <button type="button" class="btn btn-secondary" onclick="closeLoginModal()" style="flex: 1;">Cancel</button>
-                        <button type="submit" class="btn btn-primary" style="flex: 1;">Login</button>
-                    </div>
-                </form>
-            </div>
-        </div>
-        
-        <div id="errorBanner" class="error-banner"></div>
-        <div id="successBanner" class="success-banner"></div>
-        
-        <div class="stats-grid" id="statsGrid">
-            <div class="stat-card">
-                <h3>Loading...</h3>
-            </div>
-        </div>
-        
-        <div class="main-content">
-            <div class="card" id="addSegmentCard" style="display: none;">
-                <h2>Add Segment</h2>
-                <form id="addSegmentForm">
-                    <div class="form-group">
-                        <label for="segmentSite">Site</label>
-                        <select id="segmentSite" required>
-                            <option value="">Select site...</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label for="vlanId">VLAN ID</label>
-                        <input type="number" id="vlanId" min="1" max="4094" placeholder="100" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="epgName">EPG Name</label>
-                        <input type="text" id="epgName" placeholder="EPG_PROD_01" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="networkSegment">Network Segment</label>
-                        <input type="text" id="networkSegment" placeholder="192.168.1.0/24" required>
-                    </div>
-                    <div class="form-group">
-                        <label class="checkbox-label">
-                            <input type="checkbox" id="segmentDhcp">
-                            <span>DHCP Enabled</span>
-                        </label>
-                    </div>
-                    <div class="form-group">
-                        <label for="segmentDescription">Description (Optional)</label>
-                        <input type="text" id="segmentDescription" placeholder="Additional notes">
-                    </div>
-                    <button type="submit" id="addSegmentBtn">Add Segment</button>
-                </form>
-            </div>
-            
-            <div class="card" id="allocateCard" style="display: none;">
-                <h2>Allocate Segment</h2>
-                <form id="allocateForm">
-                    <div class="form-group">
-                        <label for="allocationSite">Site</label>
-                        <select id="allocationSite" required>
-                            <option value="">Select site...</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label for="clusterName">Cluster Name</label>
-                        <input type="text" id="clusterName" placeholder="cluster-prod-01" required>
-                    </div>
-                    <button type="submit" id="allocateBtn">Allocate Segment</button>
-                </form>
 
-                <div id="allocationResult" style="margin-top: 20px;"></div>
+            <div class="app-header__actions">
+                <a href="/static/html/help.html" class="btn btn-secondary" title="Help &amp; documentation">
+                    <svg viewBox="0 0 24 24" class="icon icon-sm"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                    <span>Help</span>
+                </a>
             </div>
         </div>
-        
-        <div class="card full-width" id="bulkImportCard" style="display: none;">
-            <h2>Bulk Import Segments</h2>
-            <div class="form-group">
-                <label for="bulkImport">Paste CSV data (site,vlan_id,epg_name,segment,dhcp,description)</label>
-                <textarea id="bulkImport" placeholder="site1,100,EPG_PROD_01,192.168.1.0/24,true,Production segment
-site1,101,EPG_PROD_02,192.168.2.0/24,false,Production segment 2
-site2,200,EPG_DEV_01,193.0.1.0/24,true,Development segment"></textarea>
-            </div>
-            <button onclick="importBulk()">Import Segments</button>
-        </div>
-        
-        <div class="card full-width">
-            <div class="segments-header">
-                <h2>Segments</h2>
+    </header>
+
+    <main class="main">
+        <!-- Per-site statistics -->
+        <section aria-label="Per-site statistics">
+            <div class="stats-grid" id="statsGrid" aria-busy="true"></div>
+        </section>
+
+        <!-- Segments -->
+        <section class="panel" aria-label="Segments">
+            <div class="panel__head">
+                <h2 class="panel__title">
+                    <svg viewBox="0 0 24 24" class="icon"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+                    Segments
+                    <span class="panel__count" id="segmentCount" aria-live="polite"></span>
+                </h2>
                 <div class="export-buttons">
-                    <button class="btn btn-secondary" onclick="exportData('csv')">📊 Export CSV</button>
-                    <button class="btn btn-secondary" onclick="exportData('excel')">📋 Export Excel</button>
-                    <button class="btn btn-secondary" onclick="exportStats('csv')">📈 Export Stats</button>
+                    <button type="button" class="btn btn-secondary" onclick="exportData('csv')">
+                        <svg viewBox="0 0 24 24" class="icon icon-sm"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                        CSV
+                    </button>
                 </div>
             </div>
-            <div class="filters">
-                <div class="search-container">
-                    <input type="text" id="searchInput" placeholder="Search by cluster name, EPG, VLAN ID, or segment..." class="search-input">
-                    <button id="clearSearch" class="clear-search" title="Clear search">✕</button>
+
+            <div class="toolbar">
+                <div class="search">
+                    <svg viewBox="0 0 24 24" class="icon search__icon"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                    <input type="text" id="searchInput" class="search__input"
+                           placeholder="Search cluster, EPG, VLAN ID, or segment…"
+                           aria-label="Search segments" autocomplete="off" spellcheck="false">
+                    <button type="button" id="clearSearch" class="search__clear" aria-label="Clear search">
+                        <svg viewBox="0 0 24 24" class="icon icon-sm"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                    </button>
                 </div>
-                <div class="status-tabs">
-                    <div class="tab active" data-filter="all">All</div>
-                    <div class="tab" data-filter="available">Available</div>
-                    <div class="tab" data-filter="allocated">Allocated</div>
+
+                <div class="filter-bar" id="filterBar">
+                    <button type="button" class="btn btn-secondary" id="addFilterBtn" aria-haspopup="true" aria-expanded="false">
+                        Add filter
+                    </button>
+                    <div class="filter-pills" id="filterPills"></div>
+
+                    <div class="filter-popover" id="filterPopover" hidden>
+                        <div class="filter-popover__title">Add filter</div>
+                        <div class="filter-popover__rows" id="filterRows"></div>
+                        <div class="filter-popover__add-row">
+                            <button type="button" class="btn btn-ghost" id="addOrClauseBtn">+ OR</button>
+                            <button type="button" class="btn btn-ghost" id="addAndClauseBtn">+ AND</button>
+                        </div>
+                        <div class="filter-popover__footer">
+                            <button type="button" class="btn btn-ghost" id="filterCancelBtn">Cancel</button>
+                            <button type="button" class="btn btn-primary" id="filterSaveBtn">Save</button>
+                        </div>
+                    </div>
                 </div>
+
+                <div class="segmented" role="tablist" aria-label="Filter by status">
+                    <button type="button" class="segmented__tab active" role="tab" aria-selected="true" data-filter="all">All</button>
+                    <button type="button" class="segmented__tab" role="tab" aria-selected="false" data-filter="available">Available</button>
+                    <button type="button" class="segmented__tab" role="tab" aria-selected="false" data-filter="allocated">Allocated</button>
+                </div>
+
                 <div class="site-filter">
-                    <label for="siteFilter">Filter by Site:</label>
-                    <select id="siteFilter">
-                        <option value="">All Sites</option>
+                    <label for="siteFilter">Site</label>
+                    <select id="siteFilter" class="select" aria-label="Filter by site">
+                        <option value="">All sites</option>
                     </select>
                 </div>
+
+                <div class="columns-picker" id="columnsPicker">
+                    <button type="button" class="btn btn-secondary icon-btn" id="columnsBtn" aria-haspopup="true" aria-expanded="false" title="Show/hide columns" aria-label="Show/hide columns">
+                        <svg viewBox="0 0 24 24" class="icon icon-sm"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+                    </button>
+                    <div class="columns-popover" id="columnsPopover" hidden>
+                        <div class="columns-popover__title">Columns</div>
+                        <label class="columns-popover__item"><input type="checkbox" data-col="type" checked> Type</label>
+                        <label class="columns-popover__item"><input type="checkbox" data-col="site" checked> Site</label>
+                        <label class="columns-popover__item"><input type="checkbox" data-col="vlan_id" checked> VLAN ID</label>
+                        <label class="columns-popover__item"><input type="checkbox" data-col="epg_name" checked> EPG Name</label>
+                        <label class="columns-popover__item"><input type="checkbox" data-col="segment" checked> Network Segment</label>
+                        <label class="columns-popover__item"><input type="checkbox" data-col="dhcp" checked> DHCP</label>
+                        <label class="columns-popover__item"><input type="checkbox" data-col="cluster" checked> Cluster</label>
+                        <label class="columns-popover__item"><input type="checkbox" data-col="status" checked> Status</label>
+                    </div>
+                </div>
             </div>
-            <div class="table-container">
+
+            <div class="table-wrap">
                 <table>
                     <thead>
                         <tr>
-                            <th>Site</th>
-                            <th>VLAN ID</th>
-                            <th>EPG Name</th>
-                            <th>Network Segment</th>
-                            <th>DHCP</th>
-                            <th>Cluster</th>
-                            <th>Status</th>
-                            <th>Actions</th>
+                            <th scope="col" data-col="type" data-sort="type" tabindex="0">Type<svg viewBox="0 0 24 24" class="icon sort-icon"><polyline points="18 15 12 9 6 15"/></svg></th>
+                            <th scope="col" data-col="site" data-sort="site" tabindex="0">Site<svg viewBox="0 0 24 24" class="icon sort-icon"><polyline points="18 15 12 9 6 15"/></svg></th>
+                            <th scope="col" data-col="vlan_id" data-sort="vlan_id" tabindex="0">VLAN&nbsp;ID<svg viewBox="0 0 24 24" class="icon sort-icon"><polyline points="18 15 12 9 6 15"/></svg></th>
+                            <th scope="col" data-col="epg_name" data-sort="epg_name" tabindex="0">EPG Name<svg viewBox="0 0 24 24" class="icon sort-icon"><polyline points="18 15 12 9 6 15"/></svg></th>
+                            <th scope="col" data-col="segment" data-sort="segment" tabindex="0">Network Segment<svg viewBox="0 0 24 24" class="icon sort-icon"><polyline points="18 15 12 9 6 15"/></svg></th>
+                            <th scope="col" data-col="dhcp" data-sort="dhcp" tabindex="0">DHCP<svg viewBox="0 0 24 24" class="icon sort-icon"><polyline points="18 15 12 9 6 15"/></svg></th>
+                            <th scope="col" data-col="cluster" data-sort="cluster" tabindex="0">Cluster<svg viewBox="0 0 24 24" class="icon sort-icon"><polyline points="18 15 12 9 6 15"/></svg></th>
+                            <th scope="col" data-col="status" data-sort="status" tabindex="0">Status<svg viewBox="0 0 24 24" class="icon sort-icon"><polyline points="18 15 12 9 6 15"/></svg></th>
                         </tr>
                     </thead>
-                    <tbody id="segmentsList">
-                        <tr>
-                            <td colspan="8" class="empty-state">Loading segments...</td>
-                        </tr>
-                    </tbody>
+                    <tbody id="segmentsList"></tbody>
                 </table>
             </div>
-        </div>
-        
-        <!-- Help Button - Bottom Center -->
-        <div style="text-align: center; margin: 40px 0 20px 0;">
-            <a href="/static/html/help.html" style="background: var(--primary-color); color: white; padding: 12px 30px; text-decoration: none; border-radius: 8px; font-weight: 500; display: inline-block; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">📚 Help & Documentation</a>
-        </div>
-    </div>
-    
-    <div class="connection-status">
-        <div class="status-dot" id="statusDot"></div>
-        <span id="statusText">Connected</span>
-    </div>
-    
+        </section>
+    </main>
+
+    <div class="toast-region" id="toastRegion" aria-live="polite" aria-atomic="false"></div>
+
     <script src="/static/js/app.js"></script>
 </body>
 </html>

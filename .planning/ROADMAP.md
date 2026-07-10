@@ -1,8 +1,8 @@
-# Roadmap: VLAN Manager
+# Roadmap: Segments Manager
 
 ## Overview
 
-This milestone fixes two independent problems in the VLAN Manager. Phase 1 eliminates an active data-corruption bug where VLAN objects are shared across sites instead of being scoped to their VLAN Group. Phase 2 rationalizes the validation layer by removing dead code, wrong-threat-model checks, and overly strict validators that block legitimate operator workflows. Phase 1 ships first because every segment creation that reuses a VID across sites worsens the corruption.
+This milestone fixes two independent problems in the Segments Manager. Phase 1 eliminates an active data-corruption bug where VLAN objects are shared across sites instead of being scoped to their VLAN Group. Phase 2 rationalizes the validation layer by removing dead code, wrong-threat-model checks, and overly strict validators that block legitimate operator workflows. Phase 1 ships first because every segment creation that reuses a VID across sites worsens the corruption.
 
 ## Phases
 

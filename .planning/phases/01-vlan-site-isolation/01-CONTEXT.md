@@ -16,7 +16,7 @@ Fix `get_or_create_vlan()` in `src/database/netbox_helpers.py` so every site+VID
 ### Existing unscoped VLANs
 - The app must NOT touch existing unscoped VLANs in NetBox — leave them as-is
 - No auto-reassignment, no auto-migration, no auto-delete
-- Operator (user) will manually remediate by: deleting the affected segments via VLAN Manager and recreating them — the recreate path will produce properly scoped VLANs
+- Operator (user) will manually remediate by: deleting the affected segments via Segments Manager and recreating them — the recreate path will produce properly scoped VLANs
 - The fix only affects new writes; reads of legacy unscoped VLANs are out of scope
 
 ### Audit query
@@ -34,7 +34,7 @@ Fix `get_or_create_vlan()` in `src/database/netbox_helpers.py` so every site+VID
 <specifics>
 ## Specific Ideas
 
-- Remediation path: delete segment via VLAN Manager UI/API → recreate — this naturally produces a properly scoped VLAN via the fixed code path
+- Remediation path: delete segment via Segments Manager UI/API → recreate — this naturally produces a properly scoped VLAN via the fixed code path
 - Audit query target: VLANs where `group` is null AND tenant is "Redbull" (to scope to this app's data)
 
 </specifics>

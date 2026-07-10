@@ -1,4 +1,4 @@
-# Requirements: VLAN Manager
+# Requirements: Segments Manager
 
 **Defined:** 2026-03-27
 **Core Value:** Operators can create, allocate, and search VLANs and prefixes across any VRF+Site combination without polluting each other's data in NetBox.

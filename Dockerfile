@@ -40,14 +40,14 @@ COPY . .
 # USER app
 
 # Add metadata labels
-LABEL org.opencontainers.image.title="VLAN Manager" \
+LABEL org.opencontainers.image.title="Segments Manager" \
       org.opencontainers.image.description="Network VLAN allocation and management system with shared segment support" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.created="${BUILD_DATE}" \
       org.opencontainers.image.revision="${COMMIT_SHA}" \
-      org.opencontainers.image.vendor="VLAN Manager" \
+      org.opencontainers.image.vendor="Segments Manager" \
       org.opencontainers.image.licenses="MIT" \
-      org.opencontainers.image.documentation="https://github.com/Roi12345/vlan-manager"
+      org.opencontainers.image.documentation="https://github.com/team-redbull/segments-manager"
 
 # Expose port
 EXPOSE 8000

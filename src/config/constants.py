@@ -1,4 +1,4 @@
-"""Constants and configuration values for VLAN Manager.
+"""Constants and configuration values for Segments Manager.
 
 Centralizes all magic numbers, status values, and configuration constants
 used throughout the application.

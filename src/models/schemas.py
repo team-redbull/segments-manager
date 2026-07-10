@@ -1,9 +1,12 @@
-from typing import Optional
+from typing import Optional, Literal
 from datetime import datetime
 from pydantic import BaseModel, Field
 
+SegmentType = Literal["MCE", "INVENTORY", "HC", "PXE"]
+
 
 class Segment(BaseModel):
+    type: SegmentType = Field(default="HC", description="Segment type", examples=["MCE"])
     site: str = Field(..., description="Site name (must be one of the configured sites)", examples=["site1"])
     vlan_id: int = Field(ge=1, le=4094, description="VLAN ID (1-4094)", examples=[100])
     epg_name: str = Field(..., description="Endpoint Group name", examples=["EPG_PROD_01"])
@@ -20,6 +23,7 @@ class Segment(BaseModel):
         "json_schema_extra": {
             "examples": [
                 {
+                    "type": "MCE",
                     "site": "site1",
                     "vlan_id": 100,
                     "epg_name": "EPG_PROD_01",
@@ -88,6 +92,8 @@ class VLANRelease(BaseModel):
             ]
         }
     }
+
+
 
 
 class LoginRequest(BaseModel):

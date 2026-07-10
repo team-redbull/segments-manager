@@ -205,7 +205,7 @@ _cache: Dict[str, Dict[str, Any]] = {
 }
 ```
 
-**Impact:** If admin adds new VRF in NetBox, VLAN Manager won't see it for up to 60 minutes. Causes "VRF not found" errors for new infrastructure.
+**Impact:** If admin adds new VRF in NetBox, Segments Manager won't see it for up to 60 minutes. Causes "VRF not found" errors for new infrastructure.
 
 **Recommendation:** Reduce TTL for VRFs/Roles to 15-20 minutes, or implement event-driven invalidation from NetBox webhooks.
 
@@ -337,12 +337,12 @@ pynetbox==7.3.3
 
 **Files:**
 - `src/auth/auth.py` (line 20): `Path("data/sessions.json")`
-- `src/config/settings.py` (line 159): `'vlan_manager.log'`
+- `src/config/settings.py` (line 159): `'segments_manager.log'`
 
 **Current Implementation:**
 ```python
 SESSION_FILE = Path("data/sessions.json")
-rotating_handler = RotatingFileHandler('vlan_manager.log', ...)
+rotating_handler = RotatingFileHandler('segments_manager.log', ...)
 ```
 
 **Impact:** In Kubernetes/container, working directory changes between pods. Sessions lost on pod restart. Logs written to ephemeral container filesystem.

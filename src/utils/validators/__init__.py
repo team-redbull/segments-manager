@@ -1,4 +1,4 @@
-"""Validators module for VLAN Manager.
+"""Validators module for Segments Manager.
 
 This module provides a unified Validators class that aggregates all validation methods
 from specialized validator modules. This maintains backward compatibility with existing code.

@@ -1,4 +1,4 @@
-"""Input field validators for VLAN Manager.
+"""Input field validators for Segments Manager.
 
 Handles validation of basic input fields like site, VLAN ID, EPG name, cluster name, and description.
 """

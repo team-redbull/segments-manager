@@ -1,13 +1,13 @@
 # Project Research Summary
 
-**Project:** VLAN Manager — VLAN Scoping Bug Fix + Validation Layer Rationalization
+**Project:** Segments Manager — VLAN Scoping Bug Fix + Validation Layer Rationalization
 **Domain:** NetBox IPAM integration — Python/FastAPI production application
 **Researched:** 2026-03-27
 **Confidence:** HIGH
 
 ## Executive Summary
 
-The VLAN Manager has two independent problems that research has fully characterized. The first is a critical data-integrity bug: VLAN lookups in `netbox_helpers.py:get_or_create_vlan()` search by VID alone with no group scoping, causing different sites to share a single NetBox VLAN object when they use the same VID. This silently corrupts the IPAM database — two prefixes in different sites end up referencing the same VLAN, EPG name changes on one site overwrite the other, and the NetBox UI shows incorrect associations. The fix is surgically contained to one method: resolve the VLAN Group first, then look up by `(group_id, vid)` instead of `(vid)` alone. No stack changes are needed; pynetbox 7.3.3 already supports the required filter parameters.
+The Segments Manager has two independent problems that research has fully characterized. The first is a critical data-integrity bug: VLAN lookups in `netbox_helpers.py:get_or_create_vlan()` search by VID alone with no group scoping, causing different sites to share a single NetBox VLAN object when they use the same VID. This silently corrupts the IPAM database — two prefixes in different sites end up referencing the same VLAN, EPG name changes on one site overwrite the other, and the NetBox UI shows incorrect associations. The fix is surgically contained to one method: resolve the VLAN Group first, then look up by `(group_id, vid)` instead of `(vid)` alone. No stack changes are needed; pynetbox 7.3.3 already supports the required filter parameters.
 
 The second problem is that the validation layer (~888 lines across 5 modules) was built with a threat model appropriate for a public-facing web application, not an internal network management tool. This creates unnecessary friction: operators cannot use CIDR notation (`192.168.1.0/24`) as EPG names, cannot create `/30` point-to-point links, and are blocked by XSS and NoSQL injection validators that have no real threat to defend against in this context. Research identifies a ~34% reduction in validation code achievable by removing dead code, wrong-threat-model checks, and overly strict format validators — while keeping all validators that protect NetBox data integrity.
 

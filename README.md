@@ -1,10 +1,10 @@
-# 🌐 VLAN Segment Manager
+# 🌐 Segments Manager
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 
 A modern, containerized VLAN segment management system built with **FastAPI** and a **MongoDB** backend. Features a responsive web UI with dark mode, a RESTful API, comprehensive validation, health monitoring, and deployment options for Podman and Kubernetes/OpenShift.
 
-VLAN Manager is **decentralized and per-site**: VLAN IDs and EPG names are unique per site, enforced by a MongoDB unique index. There is no VRF and no external IPAM dependency.
+Segments Manager is **decentralized and per-site**: VLAN IDs and EPG names are unique per site, enforced by a MongoDB unique index. There is no VRF and no external IPAM dependency.
 
 ---
 
@@ -25,7 +25,7 @@ VLAN Manager is **decentralized and per-site**: VLAN IDs and EPG names are uniqu
 
 ```
 ┌─────────────────────────────────────────────┐
-│                VLAN Manager                  │
+│                Segments Manager                  │
 │  API + Business Logic + Validation + Web UI  │
 └───────────────────────┬──────────────────────┘
                         │ Motor (async)
@@ -63,14 +63,14 @@ python main.py           # http://localhost:8000
 ./run.sh deploy
 
 # Or manually
-podman build -t vlan-manager:latest .
-podman run -d --name vlan-manager -p 8000:8000 --env-file .env vlan-manager:latest
+podman build -t segments-manager:latest .
+podman run -d --name segments-manager -p 8000:8000 --env-file .env segments-manager:latest
 ```
 
 ### Option 3: Kubernetes / OpenShift (Helm)
 
 ```bash
-helm install vlan-manager deploy/helm \
+helm install segments-manager deploy/helm \
   --set mongodb.url="mongodb+srv://user:pass@cluster/..." \
   --set config.sites="site1,site2,site3" \
   --set config.sitePrefixes="site1:192,site2:193,site3:194"
@@ -87,7 +87,7 @@ Use `--set mongodb.existingSecret=<name>` to source `MONGODB_URL` from an existi
 ```bash
 # MongoDB (Required)
 MONGODB_URL=mongodb://localhost:27017        # or mongodb+srv://... for Atlas
-MONGODB_DB_NAME=vlan_manager                 # optional (default: vlan_manager)
+MONGODB_DB_NAME=segments_manager                 # optional (default: segments_manager)
 
 # Sites (Required)
 SITES=site1,site2,site3
@@ -155,7 +155,7 @@ pip install pytest requests
 pytest tests/ -v
 
 # Against a different target
-VLAN_MANAGER_URL=http://host:8000 pytest tests/ -v
+SEGMENTS_MANAGER_URL=http://host:8000 pytest tests/ -v
 ```
 
 The suite skips (rather than fails) if the server is unreachable, and cleans up

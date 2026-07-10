@@ -1,8 +1,8 @@
 #!/bin/bash
 ################################################################################
-# VLAN Manager - Deployment Script
+# Segments Manager - Deployment Script
 ################################################################################
-# This script builds, deploys, and manages the VLAN Manager application
+# This script builds, deploys, and manages the Segments Manager application
 #
 # Usage:
 #   ./run.sh build          # Build Docker image only
@@ -19,8 +19,8 @@
 set -e  # Exit on error
 
 # Configuration
-CONTAINER_NAME="vlan-manager"
-IMAGE_NAME="vlan-manager:latest"
+CONTAINER_NAME="segments-manager"
+IMAGE_NAME="segments-manager:latest"
 PORT="${SERVER_PORT:-9000}"
 ENV_FILE=".env"
 VOLUME_NAME="vlan-data"
@@ -97,7 +97,7 @@ start_container() {
         PORT=$(grep "^SERVER_PORT=" .env | cut -d'=' -f2)
     fi
 
-    log_info "Starting VLAN Manager on port $PORT..."
+    log_info "Starting Segments Manager on port $PORT..."
 
     # Check if container already exists
     if podman ps -a --format "{{.Names}}" | grep -q "^${CONTAINER_NAME}$"; then
@@ -132,13 +132,13 @@ start_container() {
     podman logs "$CONTAINER_NAME" 2>&1 | tail -15
 
     echo ""
-    log_success "VLAN Manager is running!"
+    log_success "Segments Manager is running!"
     log_info "Access the application at: http://localhost:${PORT}/"
     log_info "View logs with: ./run.sh logs"
 }
 
 stop_container() {
-    log_info "Stopping VLAN Manager..."
+    log_info "Stopping Segments Manager..."
 
     if podman ps --format "{{.Names}}" | grep -q "^${CONTAINER_NAME}$"; then
         podman stop "$CONTAINER_NAME"
@@ -149,7 +149,7 @@ stop_container() {
 }
 
 restart_container() {
-    log_info "Restarting VLAN Manager..."
+    log_info "Restarting Segments Manager..."
     stop_container
     sleep 2
     start_container
@@ -265,7 +265,7 @@ full_deploy() {
 
 show_help() {
     cat << EOF
-VLAN Manager - Deployment Script
+Segments Manager - Deployment Script
 
 Usage: ./run.sh [COMMAND]
 

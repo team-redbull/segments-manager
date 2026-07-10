@@ -1,4 +1,4 @@
-# VLAN Manager — Architecture Overview
+# Segments Manager — Architecture Overview
 
 > **Production-grade network VLAN allocation and management system**
 > FastAPI application with a MongoDB backend, clean layered architecture, and per-site (decentralized) VLAN allocation.

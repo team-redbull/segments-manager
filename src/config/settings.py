@@ -4,7 +4,7 @@ import sys
 
 # MongoDB Configuration
 MONGODB_URL = os.getenv("MONGODB_URL")
-MONGODB_DB_NAME = os.getenv("MONGODB_DB_NAME", "vlan_manager")
+MONGODB_DB_NAME = os.getenv("MONGODB_DB_NAME", "segments_manager")
 
 # When true, skip TLS certificate verification for the MongoDB connection
 # (equivalent to "verify: false"). Keeps the connection encrypted but does not
@@ -97,7 +97,7 @@ def get_site_prefix(site: str) -> str:
 # Path to the rotating log file. Defaults to the current directory for local
 # runs; in the container it is set to a writable location (see Dockerfile /
 # Helm), because the app runs as a non-root user that cannot write to /app.
-LOG_FILE = os.getenv("LOG_FILE", "vlan_manager.log")
+LOG_FILE = os.getenv("LOG_FILE", "segments_manager.log")
 
 
 def setup_logging():

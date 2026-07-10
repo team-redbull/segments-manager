@@ -16,9 +16,14 @@ class SegmentQueries:
     """Query and search operations for segments"""
 
     @staticmethod
-    async def get_segments_with_filters(site: Optional[str] = None, allocated: Optional[bool] = None) -> List[Dict[str, Any]]:
+    async def get_segments_with_filters(
+        site: Optional[str] = None,
+        allocated: Optional[bool] = None,
+        locked: Optional[bool] = None,
+        type: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
         """Get segments with optional filters"""
-        segments = await get_segments(site=site, allocated=allocated)
+        segments = await get_segments(site=site, allocated=allocated, locked=locked, type=type)
         segments.sort(key=lambda x: x.get("vlan_id", 0))
         return segments
 

@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# VLAN Manager - Automatic Allocation Script for GitLab CI
+# Segments Manager - Automatic Allocation Script for GitLab CI
 #
 # This script automatically allocates VLANs to new OpenShift clusters
 # in a GitOps repository structure.
@@ -9,9 +9,9 @@
 #   ./allocate-vlan-ci.sh
 #
 # Environment Variables (Required):
-#   - VLAN_MANAGER_URL: URL of the VLAN Manager API
-#   - VLAN_MANAGER_TIMEOUT: API timeout in seconds
-#   - VLAN_MANAGER_RETRIES: Number of retry attempts
+#   - SEGMENTS_MANAGER_URL: URL of the Segments Manager API
+#   - SEGMENTS_MANAGER_TIMEOUT: API timeout in seconds
+#   - SEGMENTS_MANAGER_RETRIES: Number of retry attempts
 #   - CI_PIPELINE_SOURCE: GitLab CI pipeline source
 #   - CI_MERGE_REQUEST_TARGET_BRANCH_NAME: Target branch for MR
 #
@@ -19,16 +19,16 @@
 set -e  # Exit on error, but we'll handle errors gracefully
 
 echo "=================================================="
-echo "🌐 VLAN Manager - Automatic Allocation Pipeline"
+echo "🌐 Segments Manager - Automatic Allocation Pipeline"
 echo "=================================================="
 echo ""
 
 # ============================================================================
 # Configuration
 # ============================================================================
-VLAN_MANAGER_URL="${VLAN_MANAGER_URL}"
-VLAN_MANAGER_TIMEOUT="${VLAN_MANAGER_TIMEOUT}"
-VLAN_MANAGER_RETRIES="${VLAN_MANAGER_RETRIES}"
+SEGMENTS_MANAGER_URL="${SEGMENTS_MANAGER_URL}"
+SEGMENTS_MANAGER_TIMEOUT="${SEGMENTS_MANAGER_TIMEOUT}"
+SEGMENTS_MANAGER_RETRIES="${SEGMENTS_MANAGER_RETRIES}"
 
 # Colors for output
 GREEN='\033[0;32m'
@@ -38,22 +38,22 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # ============================================================================
-# Function: Check VLAN Manager Health
+# Function: Check Segments Manager Health
 # ============================================================================
-check_vlan_manager_health() {
-  echo -e "${BLUE}[INFO]${NC} Checking VLAN Manager health at ${VLAN_MANAGER_URL}..."
+check_segments_manager_health() {
+  echo -e "${BLUE}[INFO]${NC} Checking Segments Manager health at ${SEGMENTS_MANAGER_URL}..."
 
   local http_code
   http_code=$(curl -s -o /dev/null -w "%{http_code}" \
-    --connect-timeout "${VLAN_MANAGER_TIMEOUT}" \
-    --max-time "${VLAN_MANAGER_TIMEOUT}" \
-    "${VLAN_MANAGER_URL}/api/health" 2>/dev/null || echo "000")
+    --connect-timeout "${SEGMENTS_MANAGER_TIMEOUT}" \
+    --max-time "${SEGMENTS_MANAGER_TIMEOUT}" \
+    "${SEGMENTS_MANAGER_URL}/api/health" 2>/dev/null || echo "000")
 
   if [ "$http_code" = "200" ]; then
-    echo -e "${GREEN}[SUCCESS]${NC} VLAN Manager is healthy (HTTP ${http_code})"
+    echo -e "${GREEN}[SUCCESS]${NC} Segments Manager is healthy (HTTP ${http_code})"
     return 0
   else
-    echo -e "${YELLOW}[WARNING]${NC} VLAN Manager is not available (HTTP ${http_code})"
+    echo -e "${YELLOW}[WARNING]${NC} Segments Manager is not available (HTTP ${http_code})"
     return 1
   fi
 }
@@ -126,14 +126,14 @@ allocate_vlan() {
   local http_code
   local attempt=1
 
-  while [ $attempt -le "$VLAN_MANAGER_RETRIES" ]; do
-    echo -e "${BLUE}[INFO]${NC} Attempt ${attempt}/${VLAN_MANAGER_RETRIES}..."
+  while [ $attempt -le "$SEGMENTS_MANAGER_RETRIES" ]; do
+    echo -e "${BLUE}[INFO]${NC} Attempt ${attempt}/${SEGMENTS_MANAGER_RETRIES}..."
 
     # Make API call to allocate VLAN
     response=$(curl -s -w "\n%{http_code}" \
-      --connect-timeout "${VLAN_MANAGER_TIMEOUT}" \
-      --max-time "${VLAN_MANAGER_TIMEOUT}" \
-      -X POST "${VLAN_MANAGER_URL}/api/allocate-vlan" \
+      --connect-timeout "${SEGMENTS_MANAGER_TIMEOUT}" \
+      --max-time "${SEGMENTS_MANAGER_TIMEOUT}" \
+      -X POST "${SEGMENTS_MANAGER_URL}/api/allocate-vlan" \
       -H "Content-Type: application/json" \
       -d "{\"cluster_name\":\"${cluster_name}\",\"site\":\"${site}\"}" \
       2>/dev/null)
@@ -172,7 +172,7 @@ allocate_vlan() {
     sleep 2
   done
 
-  echo -e "${RED}[ERROR]${NC} Failed to allocate VLAN after ${VLAN_MANAGER_RETRIES} attempts"
+  echo -e "${RED}[ERROR]${NC} Failed to allocate VLAN after ${SEGMENTS_MANAGER_RETRIES} attempts"
   echo ""
   return 1
 }
@@ -225,13 +225,13 @@ fi
 echo -e "${GREEN}[INFO]${NC} Found $(echo "$CLUSTER_FILES" | wc -l) new cluster file(s)"
 echo ""
 
-# Check VLAN Manager health first
-VLAN_MANAGER_AVAILABLE=false
-if check_vlan_manager_health; then
-  VLAN_MANAGER_AVAILABLE=true
+# Check Segments Manager health first
+SEGMENTS_MANAGER_AVAILABLE=false
+if check_segments_manager_health; then
+  SEGMENTS_MANAGER_AVAILABLE=true
 else
-  echo -e "${YELLOW}[WARNING]${NC} VLAN Manager is not available. Clusters will be created without VLAN allocation."
-  echo -e "${YELLOW}[WARNING]${NC} You can manually allocate VLANs later using: POST ${VLAN_MANAGER_URL}/api/allocate-vlan"
+  echo -e "${YELLOW}[WARNING]${NC} Segments Manager is not available. Clusters will be created without VLAN allocation."
+  echo -e "${YELLOW}[WARNING]${NC} You can manually allocate VLANs later using: POST ${SEGMENTS_MANAGER_URL}/api/allocate-vlan"
   exit 0  # Exit gracefully without failing the pipeline
 fi
 
@@ -278,9 +278,9 @@ while IFS= read -r file; do
     continue
   fi
 
-  # Check if VLAN Manager is available
-  if [ "$VLAN_MANAGER_AVAILABLE" = false ]; then
-    echo -e "${YELLOW}[SKIP]${NC} VLAN Manager is not available"
+  # Check if Segments Manager is available
+  if [ "$SEGMENTS_MANAGER_AVAILABLE" = false ]; then
+    echo -e "${YELLOW}[SKIP]${NC} Segments Manager is not available"
     SKIPPED=$((SKIPPED + 1))
     continue
   fi
@@ -319,8 +319,8 @@ echo ""
 if [ $ALLOCATED -gt 0 ]; then
   echo -e "${BLUE}[INFO]${NC} Committing VLAN allocation changes..."
 
-  git config user.name "VLAN Manager Bot"
-  git config user.email "vlan-manager@automation.local"
+  git config user.name "Segments Manager Bot"
+  git config user.email "segments-manager@automation.local"
 
   git add .
 

@@ -1,4 +1,4 @@
-"""Organization and business logic validators for VLAN Manager."""
+"""Organization and business logic validators for Segments Manager."""
 
 import logging
 from typing import Dict, Any, List, Optional

@@ -1,14 +1,14 @@
 {{/*
 Expand the name of the chart.
 */}}
-{{- define "vlan-manager.name" -}}
+{{- define "segments-manager.name" -}}
 {{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
 {{/*
 Create a default fully qualified app name.
 */}}
-{{- define "vlan-manager.fullname" -}}
+{{- define "segments-manager.fullname" -}}
 {{- if .Values.fullnameOverride }}
 {{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" }}
 {{- else }}
@@ -24,16 +24,16 @@ Create a default fully qualified app name.
 {{/*
 Create chart name and version as used by the chart label.
 */}}
-{{- define "vlan-manager.chart" -}}
+{{- define "segments-manager.chart" -}}
 {{- printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
 {{/*
 Common labels
 */}}
-{{- define "vlan-manager.labels" -}}
-helm.sh/chart: {{ include "vlan-manager.chart" . }}
-{{ include "vlan-manager.selectorLabels" . }}
+{{- define "segments-manager.labels" -}}
+helm.sh/chart: {{ include "segments-manager.chart" . }}
+{{ include "segments-manager.selectorLabels" . }}
 {{- if .Chart.AppVersion }}
 app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 {{- end }}
@@ -43,17 +43,17 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{/*
 Selector labels
 */}}
-{{- define "vlan-manager.selectorLabels" -}}
-app.kubernetes.io/name: {{ include "vlan-manager.name" . }}
+{{- define "segments-manager.selectorLabels" -}}
+app.kubernetes.io/name: {{ include "segments-manager.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
 {{/*
 Create the name of the service account to use
 */}}
-{{- define "vlan-manager.serviceAccountName" -}}
+{{- define "segments-manager.serviceAccountName" -}}
 {{- if .Values.serviceAccount.create }}
-{{- default (include "vlan-manager.fullname" .) .Values.serviceAccount.name }}
+{{- default (include "segments-manager.fullname" .) .Values.serviceAccount.name }}
 {{- else }}
 {{- default "default" .Values.serviceAccount.name }}
 {{- end }}

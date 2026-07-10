@@ -29,6 +29,7 @@ class ExportService:
         export_data = []
         for segment in segments:
             export_data.append({
+                'Type': segment.get('type', ''),
                 'Site': segment.get('site', ''),
                 'VLAN ID': segment.get('vlan_id', ''),
                 'EPG Name': segment.get('epg_name', ''),

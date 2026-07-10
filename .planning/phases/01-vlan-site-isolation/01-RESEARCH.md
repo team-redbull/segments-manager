@@ -12,7 +12,7 @@
 ### Locked Decisions
 - The app must NOT touch existing unscoped VLANs in NetBox — leave them as-is
 - No auto-reassignment, no auto-migration, no auto-delete
-- Operator (user) will manually remediate by: deleting the affected segments via VLAN Manager and recreating them — the recreate path will produce properly scoped VLANs
+- Operator (user) will manually remediate by: deleting the affected segments via Segments Manager and recreating them — the recreate path will produce properly scoped VLANs
 - The fix only affects new writes; reads of legacy unscoped VLANs are out of scope
 - A query to find unscoped VLANs (e.g., `nb.ipam.vlans.filter(group__isnull=True, tenant="Redbull")`) must be included in the codebase
 - Location: as a comment or script in the repo so it can be found and rerun, not just in a PR description

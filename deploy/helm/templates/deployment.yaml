@@ -1,9 +1,9 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "vlan-manager.fullname" . }}
+  name: {{ include "segments-manager.fullname" . }}
   labels:
-    {{- include "vlan-manager.labels" . | nindent 4 }}
+    {{- include "segments-manager.labels" . | nindent 4 }}
   {{- with .Values.commonAnnotations }}
   annotations:
     {{- toYaml . | nindent 4 }}
@@ -14,7 +14,7 @@ spec:
   {{- end }}
   selector:
     matchLabels:
-      {{- include "vlan-manager.selectorLabels" . | nindent 6 }}
+      {{- include "segments-manager.selectorLabels" . | nindent 6 }}
   template:
     metadata:
       annotations:
@@ -23,7 +23,7 @@ spec:
         {{- toYaml . | nindent 8 }}
         {{- end }}
       labels:
-        {{- include "vlan-manager.selectorLabels" . | nindent 8 }}
+        {{- include "segments-manager.selectorLabels" . | nindent 8 }}
         {{- with .Values.podLabels }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
@@ -32,7 +32,7 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      serviceAccountName: {{ include "vlan-manager.serviceAccountName" . }}
+      serviceAccountName: {{ include "segments-manager.serviceAccountName" . }}
       {{- with .Values.podSecurityContext }}
       securityContext:
         {{- toYaml . | nindent 8 }}
@@ -54,50 +54,50 @@ spec:
             - name: SITES
               valueFrom:
                 configMapKeyRef:
-                  name: {{ include "vlan-manager.fullname" . }}
+                  name: {{ include "segments-manager.fullname" . }}
                   key: SITES
             - name: SITE_PREFIXES
               valueFrom:
                 configMapKeyRef:
-                  name: {{ include "vlan-manager.fullname" . }}
+                  name: {{ include "segments-manager.fullname" . }}
                   key: SITE_PREFIXES
             # Server configuration from ConfigMap
             - name: SERVER_HOST
               valueFrom:
                 configMapKeyRef:
-                  name: {{ include "vlan-manager.fullname" . }}
+                  name: {{ include "segments-manager.fullname" . }}
                   key: SERVER_HOST
             - name: SERVER_PORT
               valueFrom:
                 configMapKeyRef:
-                  name: {{ include "vlan-manager.fullname" . }}
+                  name: {{ include "segments-manager.fullname" . }}
                   key: SERVER_PORT
             - name: LOG_LEVEL
               valueFrom:
                 configMapKeyRef:
-                  name: {{ include "vlan-manager.fullname" . }}
+                  name: {{ include "segments-manager.fullname" . }}
                   key: LOG_LEVEL
             - name: LOG_FILE
               valueFrom:
                 configMapKeyRef:
-                  name: {{ include "vlan-manager.fullname" . }}
+                  name: {{ include "segments-manager.fullname" . }}
                   key: LOG_FILE
             # MongoDB config from ConfigMap
             - name: MONGODB_DB_NAME
               valueFrom:
                 configMapKeyRef:
-                  name: {{ include "vlan-manager.fullname" . }}
+                  name: {{ include "segments-manager.fullname" . }}
                   key: MONGODB_DB_NAME
             - name: MONGODB_TLS_INSECURE
               valueFrom:
                 configMapKeyRef:
-                  name: {{ include "vlan-manager.fullname" . }}
+                  name: {{ include "segments-manager.fullname" . }}
                   key: MONGODB_TLS_INSECURE
             # MongoDB URL from Secret
             - name: MONGODB_URL
               valueFrom:
                 secretKeyRef:
-                  name: {{ if .Values.mongodb.existingSecret }}{{ .Values.mongodb.existingSecret }}{{ else }}{{ include "vlan-manager.fullname" . }}-mongodb{{ end }}
+                  name: {{ if .Values.mongodb.existingSecret }}{{ .Values.mongodb.existingSecret }}{{ else }}{{ include "segments-manager.fullname" . }}-mongodb{{ end }}
                   key: {{ if .Values.mongodb.existingSecret }}{{ .Values.mongodb.existingSecretKey }}{{ else }}mongodb-url{{ end }}
           {{- with .Values.startupProbe }}
           startupProbe:
@@ -130,5 +130,5 @@ spec:
       volumes:
         - name: data
           persistentVolumeClaim:
-            claimName: {{ include "vlan-manager.fullname" . }}-data
+            claimName: {{ include "segments-manager.fullname" . }}-data
       {{- end }}

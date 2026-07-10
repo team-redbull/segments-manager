@@ -4,7 +4,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Depends, Response
 from starlette.responses import JSONResponse
 
 from ..models.schemas import (
-    VLANAllocationRequest, VLANAllocationResponse, 
+    VLANAllocationRequest, VLANAllocationResponse,
     VLANRelease, Segment, LoginRequest, LoginResponse, AuthStatusResponse
 )
 from ..services.allocation_service import AllocationService
@@ -75,9 +75,14 @@ async def release_vlan(
 
 # Segment Management Routes
 @router.get("/segments")
-async def get_segments(site: Optional[str] = None, allocated: Optional[bool] = None):
+async def get_segments(
+    site: Optional[str] = None,
+    allocated: Optional[bool] = None,
+    locked: Optional[bool] = None,
+    type: Optional[str] = None,
+):
     """Get segments with optional filters"""
-    return await SegmentService.get_segments(site, allocated)
+    return await SegmentService.get_segments(site, allocated, locked, type)
 
 @router.get("/segments/search")
 async def search_segments(
@@ -119,6 +124,21 @@ async def update_segment_clusters(
     """Update cluster assignment for a segment (for shared segments)"""
     cluster_names = request.get("cluster_names", "")
     return await SegmentService.update_segment_clusters(segment_id, cluster_names)
+
+@router.post("/segments/{segment_id}/unlock")
+async def unlock_segment(
+    segment_id: str,
+    _: bool = Depends(require_auth)
+):
+    """Unlock a segment (locked -> available).
+
+    New segments start locked (firewall rules not yet open) and are excluded
+    from automatic VLAN allocation until unlocked. Intended to be called by
+    the service responsible for opening firewall rules once it has done so.
+    This is a one-way lifecycle transition — there is no endpoint to re-lock
+    a segment.
+    """
+    return await SegmentService.unlock_segment(segment_id)
 
 @router.delete("/segments/{segment_id}")
 async def delete_segment(
@@ -184,7 +204,7 @@ async def export_stats_csv():
 # Logs Management Routes
 @router.get("/logs")
 async def get_logs(lines: int = 100):
-    """Get the contents of the vlan_manager.log file
+    """Get the contents of the segments_manager.log file
     
     Args:
         lines: Number of lines to retrieve from the end of the log file (default: 100)

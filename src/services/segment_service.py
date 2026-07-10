@@ -46,6 +46,7 @@ class SegmentService:
     def _segment_to_dict(segment: Segment) -> Dict[str, Any]:
         """Convert segment object to dictionary"""
         return {
+            "type": segment.type,
             "site": segment.site,
             "vlan_id": segment.vlan_id,
             "epg_name": segment.epg_name,
@@ -58,9 +59,14 @@ class SegmentService:
     @handle_db_errors
     @retry_on_network_error(max_retries=3)
     @log_operation_timing("get_segments", threshold_ms=1000)
-    async def get_segments(site: Optional[str] = None, allocated: Optional[bool] = None) -> List[Dict[str, Any]]:
+    async def get_segments(
+        site: Optional[str] = None,
+        allocated: Optional[bool] = None,
+        locked: Optional[bool] = None,
+        type: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
         """Get segments with optional filters"""
-        segments = await DatabaseUtils.get_segments_with_filters(site, allocated)
+        segments = await DatabaseUtils.get_segments_with_filters(site, allocated, locked, type)
         logger.debug(f"Retrieved {len(segments)} segments")
         return segments
 
@@ -209,6 +215,35 @@ class SegmentService:
 
         logger.info(f"Updated cluster assignment for segment {segment_id}")
         return {"message": "Segment cluster assignment updated successfully"}
+
+    @staticmethod
+    @handle_db_errors
+    @retry_on_network_error(max_retries=3)
+    @log_operation_timing("unlock_segment", threshold_ms=2000)
+    async def unlock_segment(segment_id: str) -> Dict[str, str]:
+        """Unlock a segment (locked -> available).
+
+        Locked is the initial state of every new segment (firewall rules not
+        yet open), and segments are excluded from automatic VLAN allocation
+        while locked. This is a one-way lifecycle transition — segments
+        cannot be re-locked via the API. Idempotent: unlocking an
+        already-unlocked segment is a no-op.
+        """
+        Validators.validate_object_id(segment_id)
+
+        existing_segment = await DatabaseUtils.get_segment_by_id(segment_id)
+        if not existing_segment:
+            raise HTTPException(status_code=404, detail="Segment not found")
+
+        if not bool(existing_segment.get("locked", False)):
+            return {"message": "Segment already unlocked"}
+
+        success = await DatabaseUtils.update_segment_by_id(segment_id, {"locked": False})
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to unlock segment")
+
+        logger.info(f"Segment {segment_id} unlocked")
+        return {"message": "Segment unlocked successfully"}
 
     @staticmethod
     @handle_db_errors

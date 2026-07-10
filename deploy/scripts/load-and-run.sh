@@ -1,17 +1,17 @@
 #!/bin/bash
 
-# VLAN Manager - Load and Run Container Image
+# Segments Manager - Load and Run Container Image
 # This script loads the container image and runs it in air-gapped environment
 
 set -e
 
-PROJECT_NAME="vlan-manager"
-IMAGE_NAME="vlan-manager"
+PROJECT_NAME="segments-manager"
+IMAGE_NAME="segments-manager"
 IMAGE_TAG="${1:-latest}"
-CONTAINER_NAME="vlan-manager"
+CONTAINER_NAME="segments-manager"
 SCRIPT_DIR="$(dirname "$0")"
 
-echo "🚀 VLAN Manager - Load and Run Container Image"
+echo "🚀 Segments Manager - Load and Run Container Image"
 echo "==============================================="
 
 # Check if podman is available
@@ -42,7 +42,7 @@ else
     
     # Set defaults (WARNING: MONGODB_URL must point at a reachable MongoDB)
     export MONGODB_URL="${MONGODB_URL:-mongodb://localhost:27017}"
-    export MONGODB_DB_NAME="${MONGODB_DB_NAME:-vlan_manager}"
+    export MONGODB_DB_NAME="${MONGODB_DB_NAME:-segments_manager}"
     export SITES="${SITES:-site1,site2,site3}"
     export SITE_PREFIXES="${SITE_PREFIXES:-site1:192,site2:193,site3:194}"
     export SERVER_HOST="${SERVER_HOST:-0.0.0.0}"
@@ -76,7 +76,7 @@ podman stop $CONTAINER_NAME 2>/dev/null || true
 podman rm $CONTAINER_NAME 2>/dev/null || true
 
 echo ""
-echo "🚀 Starting VLAN Manager container..."
+echo "🚀 Starting Segments Manager container..."
 podman run -d \
     --name $CONTAINER_NAME \
     --restart unless-stopped \
@@ -101,7 +101,7 @@ if [ $? -eq 0 ]; then
     # Health check
     echo "🏥 Checking service health..."
     if curl -f http://localhost:8000/api/health > /dev/null 2>&1; then
-        echo "✅ VLAN Manager is healthy and running!"
+        echo "✅ Segments Manager is healthy and running!"
         
         echo ""
         echo "🌐 Service Information:"

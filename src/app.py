@@ -39,7 +39,7 @@ async def lifespan(app: FastAPI):
     await close_storage()
 
 # FastAPI app - used by uvicorn server
-app = FastAPI(title="VLAN Manager API", lifespan=lifespan)
+app = FastAPI(title="Segments Manager API", lifespan=lifespan)
 
 # Custom StaticFiles class with caching headers
 class CachedStaticFiles(StaticFiles):
@@ -50,13 +50,12 @@ class CachedStaticFiles(StaticFiles):
         path = Path(full_path)
         file_extension = path.suffix.lower()
         
-        # Add cache headers for static assets
-        if file_extension in ['.css', '.js', '.png', '.jpg', '.jpeg', '.gif', '.ico', '.svg']:
-            # Cache for 1 year (static assets with versioning)
-            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
-        elif file_extension in ['.html']:
-            # Cache HTML for 1 hour but allow revalidation
-            response.headers["Cache-Control"] = "public, max-age=3600, must-revalidate"
+        # Add cache headers for static assets. Filenames aren't content-hashed,
+        # so assets must always revalidate (via the ETag/Last-Modified above) —
+        # long max-age/immutable caching would let browsers run stale JS/CSS
+        # for up to a year after a deploy.
+        if file_extension in ['.css', '.js', '.html', '.png', '.jpg', '.jpeg', '.gif', '.ico', '.svg']:
+            response.headers["Cache-Control"] = "no-cache"
         else:
             # Default cache for other files
             response.headers["Cache-Control"] = "public, max-age=86400"  # 1 day
@@ -83,6 +82,6 @@ app.include_router(router, prefix="/api")
 async def read_root():
     try:
         with open("static/html/index.html", "r", encoding="utf-8") as f:
-            return f.read()
+            return HTMLResponse(content=f.read(), headers={"Cache-Control": "no-cache"})
     except FileNotFoundError:
         return HTMLResponse(content="<h1>Error: index.html not found</h1>", status_code=500)

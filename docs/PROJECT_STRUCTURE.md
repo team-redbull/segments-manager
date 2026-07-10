@@ -1,6 +1,6 @@
 # Project Structure
 
-This document describes the organization of the VLAN Manager project directory.
+This document describes the organization of the Segments Manager project directory.
 
 ## Directory Layout
 
@@ -196,7 +196,7 @@ python tests/test_comprehensive.py
 ## Notes
 
 - Virtual environment (`.venv/`) is at project root (not committed to git)
-- Log file (`vlan_manager.log`) is at project root (not committed to git)
+- Log file (`segments_manager.log`) is at project root (not committed to git)
 - Git ignores: `.venv/`, `__pycache__/`, `*.pyc`, `.env`, `logs/`, `*.log`
 
 ---

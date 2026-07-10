@@ -1,1015 +1,1018 @@
-// Global state
-let currentFilter = 'all';
-let currentSite = '';
-let currentSearchQuery = '';
+// ============================================================================
+// Segments Manager — front-end (vanilla JS, no external dependencies)
+// Read-only dashboard: view segments, per-site stats, search, filter, export.
+// ============================================================================
+
+// ---- Global state ----------------------------------------------------------
+let currentFilter = "all";
+let currentSite = "";
+let currentSearchQuery = "";
 let isOnline = true;
-let isDarkMode = localStorage.getItem('darkMode') === 'true';
-let allSites = []; // All configured sites
-let isAuthenticated = false; // Authentication state
+let allSites = [];
 
-// Export Functions - Make explicitly global
-window.exportData = async function exportData(format) {
-    try {
-        let endpoint = '';
-        let filename = '';
-
-        if (format === 'csv') {
-            endpoint = '/export/segments/csv';
-            filename = 'segments.csv';
-        } else if (format === 'excel') {
-            endpoint = '/export/segments/excel';
-            filename = 'segments.xlsx';
-        }
-
-        // Add current filter parameters
-        const params = new URLSearchParams();
-
-        if (currentFilter === 'available') {
-            params.append('allocated', 'false');
-        } else if (currentFilter === 'allocated') {
-            params.append('allocated', 'true');
-        }
-
-        if (currentSite) {
-            params.append('site', currentSite);
-        }
-
-        const queryString = params.toString();
-        const fullEndpoint = queryString ? `${endpoint}?${queryString}` : endpoint;
-
-        const response = await fetch(`/api${fullEndpoint}`);
-
-        if (response.ok) {
-            const blob = await response.blob();
-            const url = window.URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.style.display = 'none';
-            a.href = url;
-            a.download = filename;
-            document.body.appendChild(a);
-            a.click();
-            window.URL.revokeObjectURL(url);
-            document.body.removeChild(a);
-
-            showSuccess(`${format.toUpperCase()} export completed`);
-        } else {
-            const error = await response.json();
-            showError(error.detail || 'Export failed');
-        }
-    } catch (error) {
-        console.error('Export error:', error);
-        showError('Export failed. Please try again.');
-    }
-};
-
-window.exportStats = async function exportStats(format) {
-    try {
-        const response = await fetch('/api/export/stats/csv');
-
-        if (response.ok) {
-            const blob = await response.blob();
-            const url = window.URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.style.display = 'none';
-            a.href = url;
-            a.download = 'site_statistics.csv';
-            document.body.appendChild(a);
-            a.click();
-            window.URL.revokeObjectURL(url);
-            document.body.removeChild(a);
-
-            showSuccess('Statistics export completed');
-        } else {
-            const error = await response.json();
-            showError(error.detail || 'Export failed');
-        }
-    } catch (error) {
-        console.error('Export stats error:', error);
-        showError('Export failed. Please try again.');
-    }
-};
-
-// Utility functions
-function showError(message) {
-    const banner = document.getElementById('errorBanner');
-    banner.textContent = message;
-    banner.style.display = 'block';
-    setTimeout(() => {
-        banner.style.display = 'none';
-    }, 5000);
+function quickSearchMatches(segment, needle) {
+    const hay = (value) => String(value ?? "").toLowerCase();
+    return (
+        hay(segment.site).includes(needle) ||
+        hay(segment.vlan_id).includes(needle) ||
+        hay(segment.epg_name).includes(needle) ||
+        hay(segment.segment).includes(needle) ||
+        hay(segment.cluster_name).includes(needle) ||
+        hay(segment.description).includes(needle)
+    );
 }
 
-function showVlanIdImmutableError(errorDetail) {
-    const message = `
-        🚫 VLAN ID Cannot Be Changed
+// ---- Column visibility ------------------------------------------------------
+const ALL_COLUMNS = ["type", "site", "vlan_id", "epg_name", "segment", "dhcp", "cluster", "status"];
+let hiddenColumns = new Set();
 
-        Current VLAN ID: ${errorDetail.current_vlan_id}
-        Attempted VLAN ID: ${errorDetail.attempted_vlan_id}
+function loadHiddenColumns() {
+    try {
+        const saved = JSON.parse(localStorage.getItem("sm-hidden-columns") || "[]");
+        hiddenColumns = new Set(saved.filter((c) => ALL_COLUMNS.includes(c)));
+    } catch (e) {
+        hiddenColumns = new Set();
+    }
+}
 
-        💡 Solution: Create a new segment with the desired VLAN ID and delete the old one if needed.
-    `.trim();
+function saveHiddenColumns() {
+    try {
+        localStorage.setItem("sm-hidden-columns", JSON.stringify([...hiddenColumns]));
+    } catch (e) {}
+}
 
-    const banner = document.getElementById('errorBanner');
-    banner.innerHTML = message.replace(/\n/g, '<br>');
-    banner.style.display = 'block';
-    banner.style.padding = '15px';
-    banner.style.fontSize = '14px';
-    banner.style.lineHeight = '1.4';
+function applyColumnVisibility() {
+    document.querySelectorAll("[data-col]").forEach((el) => {
+        el.style.display = hiddenColumns.has(el.getAttribute("data-col")) ? "none" : "";
+    });
+}
 
-    setTimeout(() => {
-        banner.style.display = 'none';
-        banner.style.padding = '';
-        banner.style.fontSize = '';
-        banner.style.lineHeight = '';
-    }, 8000);
+function toggleColumn(col, visible) {
+    if (visible) hiddenColumns.delete(col);
+    else hiddenColumns.add(col);
+    saveHiddenColumns();
+    applyColumnVisibility();
+}
+
+// ---- Advanced filter builder ------------------------------------------------
+const FILTER_FIELDS = [
+    {
+        key: "type",
+        label: "Type",
+        type: "select",
+        options: [
+            { value: "MCE", label: "MCE" },
+            { value: "INVENTORY", label: "INVENTORY" },
+            { value: "HC", label: "HC" },
+            { value: "PXE", label: "PXE" },
+        ],
+    },
+    { key: "site", label: "Site", type: "text" },
+    { key: "vlan_id", label: "VLAN ID", type: "number" },
+    { key: "epg_name", label: "EPG Name", type: "text" },
+    { key: "segment", label: "Network Segment", type: "text" },
+    {
+        key: "dhcp",
+        label: "DHCP",
+        type: "select",
+        options: [
+            { value: "true", label: "On" },
+            { value: "false", label: "Off" },
+        ],
+    },
+    { key: "cluster_name", label: "Cluster", type: "text" },
+    {
+        key: "status",
+        label: "Status",
+        type: "select",
+        options: [
+            { value: "locked", label: "Locked" },
+            { value: "allocated", label: "Allocated" },
+            { value: "available", label: "Available" },
+        ],
+    },
+];
+
+const TEXT_OPERATORS = [
+    { value: "contains", label: "contains" },
+    { value: "not_contains", label: "does not contain" },
+    { value: "is", label: "is" },
+    { value: "is_not", label: "is not" },
+    { value: "is_empty", label: "is empty" },
+    { value: "is_not_empty", label: "is not empty" },
+];
+const NUMBER_OPERATORS = [
+    { value: "eq", label: "=" },
+    { value: "neq", label: "≠" },
+    { value: "gt", label: ">" },
+    { value: "lt", label: "<" },
+    { value: "is_empty", label: "is empty" },
+    { value: "is_not_empty", label: "is not empty" },
+];
+const SELECT_OPERATORS = [
+    { value: "is", label: "is" },
+    { value: "is_not", label: "is not" },
+];
+
+function fieldByKey(key) {
+    return FILTER_FIELDS.find((f) => f.key === key) || FILTER_FIELDS[0];
+}
+
+function operatorsForField(fieldKey) {
+    const field = fieldByKey(fieldKey);
+    if (field.type === "number") return NUMBER_OPERATORS;
+    if (field.type === "select") return SELECT_OPERATORS;
+    return TEXT_OPERATORS;
+}
+
+function newClause(fieldKey) {
+    const field = fieldByKey(fieldKey);
+    const ops = operatorsForField(field.key);
+    return {
+        field: field.key,
+        operator: ops[0].value,
+        value: field.type === "select" ? field.options[0].value : "",
+    };
+}
+
+let filters = []; // [{ id, combinator: "AND"|"OR", clauses: [{field, operator, value}] }]
+let editingFilterId = null;
+let draftClauses = [];
+let draftCombinator = "AND";
+
+function evaluateClauseAgainstSegment(segment, clause) {
+    let raw;
+    if (clause.field === "status") {
+        raw = segment.locked
+            ? "locked"
+            : segment.cluster_name && !segment.released
+            ? "allocated"
+            : "available";
+    } else if (clause.field === "dhcp") {
+        raw = segment.dhcp ? "true" : "false";
+    } else {
+        raw = segment[clause.field];
+    }
+    const hay = String(raw ?? "").toLowerCase();
+    const needle = String(clause.value ?? "").toLowerCase();
+
+    switch (clause.operator) {
+        case "contains":
+            return hay.includes(needle);
+        case "not_contains":
+            return !hay.includes(needle);
+        case "is":
+            return hay === needle;
+        case "is_not":
+            return hay !== needle;
+        case "is_empty":
+            return hay === "";
+        case "is_not_empty":
+            return hay !== "";
+        case "eq":
+            return Number(raw) === Number(clause.value);
+        case "neq":
+            return Number(raw) !== Number(clause.value);
+        case "gt":
+            return Number(raw) > Number(clause.value);
+        case "lt":
+            return Number(raw) < Number(clause.value);
+        default:
+            return true;
+    }
+}
+
+function evaluateFilterAgainstSegment(segment, filter) {
+    return filter.clauses.reduce((acc, clause, idx) => {
+        const result = evaluateClauseAgainstSegment(segment, clause);
+        if (idx === 0) return result;
+        return filter.combinator === "OR" ? acc || result : acc && result;
+    }, true);
+}
+
+function segmentPassesFilters(segment) {
+    return filters.every((f) => evaluateFilterAgainstSegment(segment, f));
+}
+
+function renderFilterRow(clause, idx) {
+    const field = fieldByKey(clause.field);
+    const ops = operatorsForField(field.key);
+    const needsValue = clause.operator !== "is_empty" && clause.operator !== "is_not_empty";
+
+    const fieldOptions = FILTER_FIELDS.map(
+        (f) =>
+            `<option value="${f.key}" ${f.key === field.key ? "selected" : ""}>${escapeHTML(
+                f.label
+            )}</option>`
+    ).join("");
+
+    const operatorOptions = ops
+        .map(
+            (o) =>
+                `<option value="${o.value}" ${
+                    o.value === clause.operator ? "selected" : ""
+                }>${escapeHTML(o.label)}</option>`
+        )
+        .join("");
+
+    let valueControl;
+    if (!needsValue) {
+        valueControl = `<span class="filter-row__novalue">—</span>`;
+    } else if (field.type === "select") {
+        const optionsHtml = field.options
+            .map(
+                (o) =>
+                    `<option value="${o.value}" ${
+                        o.value === clause.value ? "selected" : ""
+                    }>${escapeHTML(o.label)}</option>`
+            )
+            .join("");
+        valueControl = `<select class="select filter-row__value" onchange="updateClauseValue(${idx}, this.value)">${optionsHtml}</select>`;
+    } else {
+        valueControl = `<input type="text" class="filter-row__value" placeholder="Value" value="${escapeHTML(
+            clause.value
+        )}" oninput="updateClauseValue(${idx}, this.value)">`;
+    }
+
+    const combinatorBadge =
+        idx > 0 ? `<span class="filter-row__combinator">${draftCombinator}</span>` : "";
+
+    return `
+        <div class="filter-row">
+            ${combinatorBadge}
+            <select class="select filter-row__field" onchange="updateClauseField(${idx}, this.value)">${fieldOptions}</select>
+            <select class="select filter-row__operator" onchange="updateClauseOperator(${idx}, this.value)">${operatorOptions}</select>
+            ${valueControl}
+            <button type="button" class="icon-btn btn btn-ghost filter-row__remove" onclick="removeClause(${idx})" aria-label="Remove condition" title="Remove condition">
+                <svg viewBox="0 0 24 24" class="icon icon-sm"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/></svg>
+            </button>
+        </div>`;
+}
+
+function renderFilterRows() {
+    const rowsContainer = document.getElementById("filterRows");
+    if (!rowsContainer) return;
+    rowsContainer.innerHTML = draftClauses.map((clause, idx) => renderFilterRow(clause, idx)).join("");
+}
+
+window.updateClauseField = function (idx, value) {
+    draftClauses[idx] = newClause(value);
+    renderFilterRows();
+};
+window.updateClauseOperator = function (idx, value) {
+    draftClauses[idx].operator = value;
+    renderFilterRows();
+};
+window.updateClauseValue = function (idx, value) {
+    draftClauses[idx].value = value;
+};
+window.removeClause = function (idx) {
+    draftClauses.splice(idx, 1);
+    if (draftClauses.length === 0) draftClauses.push(newClause("epg_name"));
+    renderFilterRows();
+};
+
+function openFilterPopover(filterId) {
+    editingFilterId = filterId || null;
+    const existing = filterId ? filters.find((f) => f.id === filterId) : null;
+    draftClauses = existing ? existing.clauses.map((c) => ({ ...c })) : [newClause("epg_name")];
+    draftCombinator = existing ? existing.combinator : "AND";
+    renderFilterRows();
+    document.getElementById("filterPopover").hidden = false;
+    document.getElementById("addFilterBtn").setAttribute("aria-expanded", "true");
+}
+
+function closeFilterPopover() {
+    const popover = document.getElementById("filterPopover");
+    if (popover) popover.hidden = true;
+    const btn = document.getElementById("addFilterBtn");
+    if (btn) btn.setAttribute("aria-expanded", "false");
+    editingFilterId = null;
+}
+
+function saveFilter() {
+    const cleanClauses = draftClauses.filter((c) => {
+        if (c.operator === "is_empty" || c.operator === "is_not_empty") return true;
+        return String(c.value ?? "").trim() !== "";
+    });
+
+    if (cleanClauses.length === 0) {
+        closeFilterPopover();
+        return;
+    }
+
+    if (editingFilterId) {
+        const existing = filters.find((f) => f.id === editingFilterId);
+        existing.clauses = cleanClauses;
+        existing.combinator = draftCombinator;
+    } else {
+        filters.push({
+            id: "f" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+            clauses: cleanClauses,
+            combinator: draftCombinator,
+        });
+    }
+
+    closeFilterPopover();
+    renderFilterPills();
+    loadSegments(true);
+}
+
+window.removeFilter = function (filterId) {
+    filters = filters.filter((f) => f.id !== filterId);
+    renderFilterPills();
+    loadSegments(true);
+};
+
+window.openFilterPopover = openFilterPopover;
+
+function describeClause(clause) {
+    const field = fieldByKey(clause.field);
+    const ops = operatorsForField(clause.field);
+    const opLabel = (ops.find((o) => o.value === clause.operator) || {}).label || clause.operator;
+
+    if (clause.operator === "is_empty" || clause.operator === "is_not_empty") {
+        return `${field.label} ${opLabel}`;
+    }
+
+    let valueLabel = clause.value;
+    if (field.type === "select") {
+        const opt = field.options.find((o) => o.value === clause.value);
+        valueLabel = opt ? opt.label : clause.value;
+    }
+    return `${field.label} ${opLabel} "${valueLabel}"`;
+}
+
+function renderFilterPills() {
+    const container = document.getElementById("filterPills");
+    if (!container) return;
+    container.innerHTML = filters
+        .map((f) => {
+            const text = f.clauses.map(describeClause).join(` ${f.combinator} `);
+            return `
+                <span class="filter-pill" onclick="openFilterPopover('${f.id}')" role="button" tabindex="0">
+                    <span class="filter-pill__text">${escapeHTML(text)}</span>
+                    <button type="button" class="filter-pill__remove" onclick="event.stopPropagation(); removeFilter('${f.id}')" aria-label="Remove filter">
+                        <svg viewBox="0 0 24 24" class="icon icon-sm"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                    </button>
+                </span>`;
+        })
+        .join("");
+}
+
+// ---- Inline SVG icons (kept in one place) ----------------------------------
+const ICONS = {
+    server:
+        '<svg viewBox="0 0 24 24" class="icon icon-sm"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>',
+    inbox:
+        '<svg viewBox="0 0 24 24" class="icon"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>',
+    alert:
+        '<svg viewBox="0 0 24 24" class="icon"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
+    check:
+        '<svg viewBox="0 0 24 24" class="icon icon-sm toast__icon"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>',
+    xCircle:
+        '<svg viewBox="0 0 24 24" class="icon icon-sm toast__icon"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>',
+    copy:
+        '<svg viewBox="0 0 24 24" class="icon icon-sm copyable__icon" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>',
+};
+
+// ---- Copy to clipboard ------------------------------------------------------
+const COPY_LABELS = {
+    vlan_id: "VLAN ID",
+    epg_name: "EPG name",
+    segment: "Segment",
+};
+
+async function copyToClipboard(text) {
+    if (navigator.clipboard && window.isSecureContext) {
+        try {
+            await navigator.clipboard.writeText(text);
+            return true;
+        } catch (e) {
+            // fall through to legacy method
+        }
+    }
+    try {
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        const ok = document.execCommand("copy");
+        document.body.removeChild(ta);
+        return ok;
+    } catch (e) {
+        return false;
+    }
+}
+
+async function handleCopyableActivate(cell) {
+    const value = cell.getAttribute("data-copy");
+    if (!value) return;
+    const ok = await copyToClipboard(value);
+    const label = COPY_LABELS[cell.getAttribute("data-col")] || "Value";
+    if (ok) showSuccess(`${label} copied to clipboard`);
+    else showError("Copy failed. Please copy manually.");
+}
+
+// ---- Utilities -------------------------------------------------------------
+function escapeHTML(value) {
+    if (value === null || value === undefined) return "";
+    return String(value)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+}
+
+// ---- Toast notifications ---------------------------------------------------
+function showToast(message, type) {
+    const region = document.getElementById("toastRegion");
+    if (!region) return;
+
+    const toast = document.createElement("div");
+    toast.className = "toast toast--" + (type === "error" ? "error" : "success");
+    toast.setAttribute("role", type === "error" ? "alert" : "status");
+    toast.innerHTML =
+        (type === "error" ? ICONS.xCircle : ICONS.check) +
+        '<div class="toast__body">' +
+        escapeHTML(message) +
+        "</div>";
+    region.appendChild(toast);
+
+    const remove = () => {
+        toast.classList.add("leaving");
+        toast.addEventListener("animationend", () => toast.remove(), { once: true });
+        setTimeout(() => toast.remove(), 300);
+    };
+    setTimeout(remove, type === "error" ? 6000 : 4000);
+}
+
+function showError(message) {
+    showToast(message, "error");
 }
 
 function showSuccess(message) {
-    const banner = document.getElementById('successBanner');
-    banner.textContent = message;
-    banner.style.display = 'block';
-    setTimeout(() => {
-        banner.style.display = 'none';
-    }, 5000);
+    showToast(message, "success");
 }
 
+// ---- Connection status (tracked silently; gates auto-refresh) --------------
 function updateConnectionStatus(online) {
     isOnline = online;
-    const dot = document.getElementById('statusDot');
-    const text = document.getElementById('statusText');
-
-    if (online) {
-        dot.classList.remove('offline');
-        text.textContent = 'Connected';
-    } else {
-        dot.classList.add('offline');
-        text.textContent = 'Offline';
-    }
 }
 
+// ---- API helpers -----------------------------------------------------------
 async function fetchAPI(endpoint, options = {}) {
     try {
-        console.log('Fetching API:', endpoint);
         const response = await fetch(`/api${endpoint}`, {
             ...options,
-            headers: {
-                'Content-Type': 'application/json',
-                ...options.headers
-            }
+            headers: { "Content-Type": "application/json", ...options.headers },
         });
 
-        console.log('API response status:', response.status);
         updateConnectionStatus(true);
 
         if (!response.ok) {
-            const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
+            const error = await response
+                .json()
+                .catch(() => ({ detail: "Unknown error" }));
 
-            // Handle Pydantic validation errors (detail is an array)
             if (Array.isArray(error.detail)) {
-                const messages = error.detail.map(err => err.msg || err.message || 'Validation error').join('; ');
+                const messages = error.detail
+                    .map((err) => err.msg || err.message || "Validation error")
+                    .join("; ");
                 throw new Error(messages);
             }
-
             throw new Error(error.detail || `HTTP ${response.status}`);
         }
 
-        const result = await response.json();
-        console.log('API response data:', result);
-        return result;
+        return await response.json();
     } catch (error) {
-        console.error('API fetch error:', error);
-        if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
+        if (
+            error.message.includes("Failed to fetch") ||
+            error.message.includes("NetworkError")
+        ) {
             updateConnectionStatus(false);
-            throw new Error('Connection lost. Please check your network.');
+            throw new Error("Connection lost. Please check your network.");
         }
         throw error;
     }
 }
 
-async function loadSites() {
-    try {
-        console.log('Loading sites...');
-        const data = await fetchAPI('/sites');
-        console.log('Sites data received:', data);
-        const sites = data.sites;
-        allSites = sites;
-
-        const segmentSiteSelect = document.getElementById('segmentSite');
-        const allocationSiteSelect = document.getElementById('allocationSite');
-        const siteFilterSelect = document.getElementById('siteFilter');
-
-        segmentSiteSelect.innerHTML = '<option value="">Select site...</option>';
-        allocationSiteSelect.innerHTML = '<option value="">Select site...</option>';
-        siteFilterSelect.innerHTML = '<option value="">All Sites</option>';
-
-        sites.forEach(site => {
-            segmentSiteSelect.innerHTML += `<option value="${site}">${site}</option>`;
-            allocationSiteSelect.innerHTML += `<option value="${site}">${site}</option>`;
-            siteFilterSelect.innerHTML += `<option value="${site}">${site}</option>`;
-        });
-
-        console.log('Sites loaded successfully:', sites);
-    } catch (error) {
-        console.error('Failed to load sites:', error);
-        showError('Failed to load sites: ' + error.message);
-    }
+// ---- Export ----------------------------------------------------------------
+function triggerDownload(blob, filename) {
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.style.display = "none";
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    window.URL.revokeObjectURL(url);
+    document.body.removeChild(a);
 }
 
-async function loadStats() {
+window.exportData = async function exportData(format) {
     try {
-        const stats = await fetchAPI('/stats');
-        const container = document.getElementById('statsGrid');
+        let endpoint = "";
+        let filename = "";
 
-        if (stats.length === 0) {
-            container.innerHTML = '<div class="stat-card"><h3>No sites configured</h3></div>';
-            return;
+        if (format === "csv") {
+            endpoint = "/export/segments/csv";
+            filename = "segments.csv";
+        } else if (format === "excel") {
+            endpoint = "/export/segments/excel";
+            filename = "segments.xlsx";
         }
 
-        container.innerHTML = stats.map(stat => `
-            <div class="stat-card">
-                <h3>${stat.site}</h3>
-                <div class="stat-item">
-                    <span>Total Segments:</span>
-                    <strong>${stat.total_segments}</strong>
-                </div>
-                <div class="stat-item">
-                    <span>Allocated:</span>
-                    <strong>${stat.allocated}</strong>
-                </div>
-                <div class="stat-item">
-                    <span>Available:</span>
-                    <strong style="color: ${stat.available > 0 ? '#48bb78' : '#f56565'}">${stat.available}</strong>
-                </div>
-                <div class="stat-item">
-                    <span>Utilization:</span>
-                    <strong>${stat.utilization}%</strong>
-                </div>
-                <div class="progress-bar">
-                    <div class="progress-fill" style="width: ${stat.utilization}%"></div>
-                </div>
-            </div>
-        `).join('');
-    } catch (error) {
-        console.error('Failed to load stats:', error);
-    }
-}
-
-async function loadSegments() {
-    try {
-        let endpoint = '/segments';
         const params = new URLSearchParams();
-
-        // If there's a search query, use search endpoint
-        if (currentSearchQuery.trim()) {
-            endpoint = '/segments/search';
-            params.append('q', currentSearchQuery.trim());
-        }
-
-        if (currentFilter === 'available') {
-            params.append('allocated', 'false');
-        } else if (currentFilter === 'allocated') {
-            params.append('allocated', 'true');
-        }
-
-        if (currentSite) {
-            params.append('site', currentSite);
-        }
+        if (currentFilter === "available") params.append("allocated", "false");
+        else if (currentFilter === "allocated") params.append("allocated", "true");
+        if (currentSite) params.append("site", currentSite);
 
         const queryString = params.toString();
-        if (queryString) {
-            endpoint += '?' + queryString;
+        const fullEndpoint = queryString ? `${endpoint}?${queryString}` : endpoint;
+
+        const response = await fetch(`/api${fullEndpoint}`);
+        if (response.ok) {
+            triggerDownload(await response.blob(), filename);
+            showSuccess(`${format.toUpperCase()} export completed`);
+        } else {
+            const error = await response.json().catch(() => ({}));
+            showError(error.detail || "Export failed");
         }
+    } catch (error) {
+        showError("Export failed. Please try again.");
+    }
+};
 
-        const segments = await fetchAPI(endpoint);
-        const container = document.getElementById('segmentsList');
+// ---- Sites -----------------------------------------------------------------
+async function loadSites() {
+    try {
+        const data = await fetchAPI("/sites");
+        allSites = data.sites || [];
 
-        if (segments.length === 0) {
-            container.innerHTML = '<tr><td colspan="8" class="empty-state">No segments found</td></tr>';
+        const select = document.getElementById("siteFilter");
+        const current = select.value;
+        select.innerHTML = '<option value="">All sites</option>';
+        allSites.forEach((site) => {
+            const opt = document.createElement("option");
+            opt.value = site;
+            opt.textContent = site;
+            select.appendChild(opt);
+        });
+        select.value = current;
+    } catch (error) {
+        showError("Failed to load sites: " + error.message);
+    }
+}
+
+// ---- Stats -----------------------------------------------------------------
+function statSkeleton() {
+    return `
+        <div class="stat-card">
+            <div class="stat-card__head">
+                <span class="skeleton" style="width:90px;height:16px"></span>
+                <span class="skeleton" style="width:48px;height:20px;border-radius:999px"></span>
+            </div>
+            <div class="stat-card__metrics">
+                <span class="skeleton" style="height:34px"></span>
+                <span class="skeleton" style="height:34px"></span>
+                <span class="skeleton" style="height:34px"></span>
+            </div>
+            <span class="skeleton" style="height:8px;border-radius:999px"></span>
+        </div>`;
+}
+
+async function loadStats(showSkeleton = false) {
+    const container = document.getElementById("statsGrid");
+    if (showSkeleton && container) {
+        container.setAttribute("aria-busy", "true");
+        container.innerHTML = statSkeleton().repeat(3);
+    }
+
+    try {
+        const stats = await fetchAPI("/stats");
+        if (!container) return;
+        container.removeAttribute("aria-busy");
+
+        if (!stats || stats.length === 0) {
+            container.innerHTML =
+                '<div class="stat-card"><div class="stat-card__site">No sites configured</div></div>';
             return;
         }
 
-        container.innerHTML = segments.map(segment => {
-            const isAllocated = segment.cluster_name && !segment.released;
-            return `
+        container.innerHTML = stats
+            .map((stat) => {
+                const util = Number(stat.utilization) || 0;
+                const availableZero = Number(stat.available) === 0;
+                return `
+                <article class="stat-card">
+                    <div class="stat-card__head">
+                        <div class="stat-card__site">${ICONS.server}<span>${escapeHTML(
+                    stat.site
+                )}</span></div>
+                        <span class="stat-card__util">${util}%</span>
+                    </div>
+                    <div class="stat-card__metrics">
+                        <div class="metric">
+                            <span class="metric__value">${escapeHTML(
+                                stat.total_segments
+                            )}</span>
+                            <span class="metric__label">Total</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric__value">${escapeHTML(
+                                stat.allocated
+                            )}</span>
+                            <span class="metric__label">Allocated</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric__value ${
+                                availableZero ? "is-zero" : "is-ok"
+                            }">${escapeHTML(stat.available)}</span>
+                            <span class="metric__label">Available</span>
+                        </div>
+                    </div>
+                    <div class="progress" role="progressbar" aria-valuenow="${util}" aria-valuemin="0" aria-valuemax="100" aria-label="${escapeHTML(
+                    stat.site
+                )} utilization">
+                        <div class="progress__fill ${
+                            util >= 85 ? "is-high" : ""
+                        }" style="width:${util}%"></div>
+                    </div>
+                </article>`;
+            })
+            .join("");
+    } catch (error) {
+        if (container) {
+            container.removeAttribute("aria-busy");
+            if (showSkeleton) {
+                container.innerHTML =
+                    '<div class="stat-card"><div class="stat-card__site">Failed to load statistics</div></div>';
+            }
+        }
+    }
+}
+
+// ---- Segments --------------------------------------------------------------
+function rowSkeleton() {
+    const cell = (col, w) =>
+        `<td data-col="${col}"><span class="skeleton" style="width:${w}"></span></td>`;
+    return (
+        "<tr>" +
+        cell("type", "70px") +
+        cell("site", "60px") +
+        cell("vlan_id", "50px") +
+        cell("epg_name", "70%") +
+        cell("segment", "120px") +
+        cell("dhcp", "36px") +
+        cell("cluster", "80px") +
+        cell("status", "80px") +
+        "</tr>"
+    );
+}
+
+function emptyState(icon, title, desc) {
+    return `
+        <tr>
+            <td colspan="8" class="state-cell">
+                <div class="state">
+                    ${icon}
+                    <span class="state__title">${escapeHTML(title)}</span>
+                    <span class="state__desc">${escapeHTML(desc)}</span>
+                </div>
+            </td>
+        </tr>`;
+}
+
+function updateSegmentCount(n) {
+    const el = document.getElementById("segmentCount");
+    if (el) el.textContent = n + (n === 1 ? " segment" : " segments");
+}
+
+// ---- Column sorting ----------------------------------------------------------
+let sortColumn = null;
+let sortDirection = "asc";
+
+function segmentStatusLabel(segment) {
+    if (segment.locked) return "Locked";
+    if (segment.cluster_name && !segment.released) return "Allocated";
+    return "Available";
+}
+
+function compareSegments(a, b, column, direction) {
+    let av, bv;
+    switch (column) {
+        case "vlan_id":
+            av = Number(a.vlan_id) || 0;
+            bv = Number(b.vlan_id) || 0;
+            break;
+        case "dhcp":
+            av = a.dhcp ? 1 : 0;
+            bv = b.dhcp ? 1 : 0;
+            break;
+        case "cluster":
+            av = (a.cluster_name || "").toLowerCase();
+            bv = (b.cluster_name || "").toLowerCase();
+            break;
+        case "status":
+            av = segmentStatusLabel(a).toLowerCase();
+            bv = segmentStatusLabel(b).toLowerCase();
+            break;
+        default:
+            av = String(a[column] ?? "").toLowerCase();
+            bv = String(b[column] ?? "").toLowerCase();
+    }
+    const cmp = typeof av === "number" ? av - bv : av < bv ? -1 : av > bv ? 1 : 0;
+    return direction === "desc" ? -cmp : cmp;
+}
+
+function sortSegments(segments) {
+    if (!sortColumn) return segments;
+    return segments.slice().sort((a, b) => compareSegments(a, b, sortColumn, sortDirection));
+}
+
+function updateSortHeaders() {
+    document.querySelectorAll("th[data-sort]").forEach((th) => {
+        const col = th.getAttribute("data-sort");
+        th.classList.remove("sort-active", "sort-desc");
+        th.removeAttribute("aria-sort");
+        if (col === sortColumn) {
+            th.classList.add("sort-active");
+            if (sortDirection === "desc") th.classList.add("sort-desc");
+            th.setAttribute("aria-sort", sortDirection === "desc" ? "descending" : "ascending");
+        }
+    });
+}
+
+async function loadSegments(showSkeleton = false) {
+    const container = document.getElementById("segmentsList");
+    if (showSkeleton && container) {
+        container.innerHTML = rowSkeleton().repeat(8);
+        applyColumnVisibility();
+    }
+
+    try {
+        const params = new URLSearchParams();
+        if (currentFilter === "available") params.append("allocated", "false");
+        else if (currentFilter === "allocated") params.append("allocated", "true");
+        if (currentSite) params.append("site", currentSite);
+
+        const queryString = params.toString();
+        const endpoint = "/segments" + (queryString ? "?" + queryString : "");
+
+        let segments = await fetchAPI(endpoint);
+        if (!container) return;
+
+        const needle = currentSearchQuery.trim().toLowerCase();
+        if (needle) {
+            segments = segments.filter((s) => quickSearchMatches(s, needle));
+        }
+        if (filters.length > 0) {
+            segments = segments.filter((s) => segmentPassesFilters(s));
+        }
+        segments = sortSegments(segments);
+
+        const isFiltering = needle.length > 0 || filters.length > 0;
+
+        if (!segments || segments.length === 0) {
+            updateSegmentCount(0);
+            container.innerHTML = emptyState(
+                ICONS.inbox,
+                isFiltering ? "No matches found" : "No segments",
+                isFiltering
+                    ? "Try a different search term or filter, or clear the current filters."
+                    : "No segments match the current filters."
+            );
+            return;
+        }
+
+        updateSegmentCount(segments.length);
+
+        container.innerHTML = segments
+            .map((segment) => {
+                const isLocked = !!segment.locked;
+                const isAllocated = segment.cluster_name && !segment.released;
+                const statusClass = isLocked ? "locked" : isAllocated ? "allocated" : "available";
+                const statusLabel = isLocked ? "Locked" : isAllocated ? "Allocated" : "Available";
+                const dhcp = segment.dhcp;
+                return `
                 <tr>
-                    <td>${segment.site}</td>
-                    <td><strong>${segment.vlan_id}</strong></td>
-                    <td><code>${segment.epg_name}</code></td>
-                    <td><code>${segment.segment}</code></td>
-                    <td>${segment.dhcp ? 'Yes' : 'No'}</td>
-                    <td>${segment.cluster_name || '-'}</td>
-                    <td>
-                        <span class="badge ${isAllocated ? 'allocated' : 'available'}">
-                            ${isAllocated ? 'Allocated' : 'Available'}
-                        </span>
-                    </td>
-                    <td>
-                        ${isAuthenticated ? `
-                            <button class="edit"
-                                    onclick="editSegment('${segment._id}')"
-                                    data-segment-id="${segment._id}">
-                                Edit
-                            </button>
-                            ${isAllocated ? `
-                                <button class="release"
-                                        onclick="releaseSegment('${segment.cluster_name}', '${segment.site}')"
-                                        data-cluster="${segment.cluster_name}"
-                                        data-site="${segment.site}">
-                                    Release
-                                </button>
-                            ` : `
-                                <button class="delete"
-                                        onclick="deleteSegment('${segment._id}')"
-                                        data-segment-id="${segment._id}">
-                                    Delete
-                                </button>
-                            `}
-                        ` : '<span style="color: #999; font-style: italic;">-</span>'}
-                    </td>
-                </tr>
-            `;
-        }).join('');
+                    <td data-col="type">${
+                        segment.type
+                            ? `<span class="badge-type">${escapeHTML(segment.type)}</span>`
+                            : '<span class="cell-muted">—</span>'
+                    }</td>
+                    <td data-col="site"><span class="site-chip">${escapeHTML(segment.site)}</span></td>
+                    <td data-col="vlan_id" class="cell-strong copyable" tabindex="0" data-copy="${escapeHTML(segment.vlan_id)}">${escapeHTML(segment.vlan_id)}${ICONS.copy}</td>
+                    <td data-col="epg_name" class="col-epg cell-mono copyable" tabindex="0" data-copy="${escapeHTML(segment.epg_name)}">${escapeHTML(segment.epg_name)}${ICONS.copy}</td>
+                    <td data-col="segment" class="cell-mono copyable" tabindex="0" data-copy="${escapeHTML(segment.segment)}">${escapeHTML(segment.segment)}${ICONS.copy}</td>
+                    <td data-col="dhcp"><span class="badge-soft ${
+                        dhcp ? "dhcp-on" : ""
+                    }">${dhcp ? "On" : "Off"}</span></td>
+                    <td data-col="cluster">${
+                        segment.cluster_name
+                            ? escapeHTML(segment.cluster_name)
+                            : '<span class="cell-muted">—</span>'
+                    }</td>
+                    <td data-col="status"><span class="badge ${statusClass}">${statusLabel}</span></td>
+                </tr>`;
+            })
+            .join("");
+        applyColumnVisibility();
     } catch (error) {
-        console.error('Failed to load segments:', error);
-        document.getElementById('segmentsList').innerHTML =
-            '<tr><td colspan="8" class="empty-state">Failed to load segments</td></tr>';
-    }
-}
-
-async function deleteSegment(segmentId) {
-    if (!isAuthenticated) {
-        showError('Please login to delete segments');
-        return;
-    }
-    if (!confirm('Are you sure you want to delete this segment?')) return;
-
-    try {
-        const button = document.querySelector(`button[data-segment-id="${segmentId}"]`);
-        if (button) button.disabled = true;
-
-        await fetchAPI(`/segments/${segmentId}`, { method: 'DELETE' });
-        showSuccess('Segment deleted successfully');
-        await Promise.all([loadSegments(), loadStats()]);
-    } catch (error) {
-        showError(`Failed to delete segment: ${error.message}`);
-        const button = document.querySelector(`button[data-segment-id="${segmentId}"]`);
-        if (button) button.disabled = false;
-    }
-}
-
-async function releaseSegment(clusterName, site) {
-    if (!isAuthenticated) {
-        showError('Please login to release segments');
-        return;
-    }
-    if (!confirm(`Release segment for ${clusterName} at ${site}?`)) return;
-
-    try {
-        const button = document.querySelector(`button[data-cluster="${clusterName}"][data-site="${site}"]`);
-        if (button) button.disabled = true;
-
-        await fetchAPI('/release-vlan', {
-            method: 'POST',
-            body: JSON.stringify({ cluster_name: clusterName, site: site })
-        });
-
-        showSuccess(`Segment released for ${clusterName} at ${site}`);
-        await Promise.all([loadSegments(), loadStats()]);
-    } catch (error) {
-        showError(`Failed to release segment: ${error.message}`);
-        const button = document.querySelector(`button[data-cluster="${clusterName}"][data-site="${site}"]`);
-        if (button) button.disabled = false;
-    }
-}
-
-async function importBulk() {
-    if (!isAuthenticated) {
-        showError('Please login to import segments');
-        return;
-    }
-    const textarea = document.getElementById('bulkImport');
-    const csvData = textarea.value.trim();
-
-    if (!csvData) {
-        showError('Please enter CSV data to import');
-        return;
-    }
-
-    const lines = csvData.split(/\r?\n/).filter(l => l.trim().length > 0);
-    console.log(`Parsing ${lines.length} CSV lines`);
-    const segments = [];
-    const skippedRows = [];
-
-    for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
-        const parts = line.split(',').map(p => p.trim());
-
-        // Format: site,vlan_id,epg_name,segment,dhcp,description
-        if (parts.length < 5) {
-            console.warn(`Row ${i + 1}: Skipped - only ${parts.length} columns found (expected at least 5). Line: ${line}`);
-            skippedRows.push(`Row ${i + 1}: Insufficient columns (found ${parts.length}, need 5)`);
-            continue;
+        if (container) {
+            updateSegmentCount(0);
+            container.innerHTML = emptyState(
+                ICONS.alert,
+                "Failed to load segments",
+                error.message || "Please refresh the page to try again."
+            );
         }
-
-        const vlan = parseInt(parts[1], 10);
-        if (!Number.isFinite(vlan) || vlan < 1 || vlan > 4094) {
-            console.warn(`Row ${i + 1}: Skipped - invalid VLAN ID '${parts[1]}'. Line: ${line}`);
-            skippedRows.push(`Row ${i + 1}: Invalid VLAN ID '${parts[1]}' (must be 1-4094)`);
-            continue;
-        }
-
-        const dhcp = parts[4].toLowerCase() === 'true';
-
-        segments.push({
-            site: parts[0],
-            vlan_id: vlan,
-            epg_name: parts[2],
-            segment: parts[3],
-            dhcp: dhcp,
-            description: parts[5] || ''
-        });
     }
+}
 
-    console.log(`Parsed ${segments.length} valid segments, skipped ${skippedRows.length} rows`);
-
-    if (segments.length === 0) {
-        let errorMsg = 'No valid segments found in CSV data.';
-        if (skippedRows.length > 0) {
-            errorMsg += '\n\nIssues found:\n' + skippedRows.slice(0, 5).join('\n');
-            if (skippedRows.length > 5) {
-                errorMsg += `\n... and ${skippedRows.length - 5} more issues`;
+// ---- Init ------------------------------------------------------------------
+document.addEventListener("DOMContentLoaded", function () {
+    // Sortable column headers
+    document.querySelectorAll("th[data-sort]").forEach((th) => {
+        const activateSort = () => {
+            const col = th.getAttribute("data-sort");
+            if (sortColumn === col) {
+                sortDirection = sortDirection === "asc" ? "desc" : "asc";
+            } else {
+                sortColumn = col;
+                sortDirection = "asc";
             }
-        }
-        errorMsg += '\n\nExpected format: site,vlan_id,epg_name,segment,dhcp,description';
-        showError(errorMsg);
-        return;
-    }
-
-    try {
-        const result = await fetchAPI('/segments/bulk', {
-            method: 'POST',
-            body: JSON.stringify(segments)
-        });
-
-        if (result.errors && result.errors.length > 0) {
-            showError(`Created ${result.created} segments. Errors: ${result.errors.join(', ')}`);
-        } else {
-            showSuccess(`Successfully imported ${result.created} segments`);
-        }
-
-        textarea.value = '';
-        await Promise.all([loadSegments(), loadStats()]);
-    } catch (error) {
-        showError(`Failed to import segments: ${error.message}`);
-    }
-}
-
-// Authentication functions
-async function checkAuthStatus() {
-    try {
-        const response = await fetchAPI('/auth/status');
-        isAuthenticated = response.authenticated;
-        updateUIAuthState();
-        return isAuthenticated;
-    } catch (error) {
-        console.error('Failed to check auth status:', error);
-        isAuthenticated = false;
-        updateUIAuthState();
-        return false;
-    }
-}
-
-async function handleLogin(username, password) {
-    try {
-        const response = await fetch('/api/auth/login', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ username, password })
-        });
-
-        if (response.ok) {
-            isAuthenticated = true;
-            updateUIAuthState();
-            showSuccess('Login successful');
-            return true;
-        } else {
-            const error = await response.json();
-            showLoginError(error.detail || 'Invalid username or password');
-            return false;
-        }
-    } catch (error) {
-        console.error('Login error:', error);
-        showLoginError('Login failed. Please try again.');
-        return false;
-    }
-}
-
-async function handleLogout() {
-    try {
-        await fetch('/api/auth/logout', {
-            method: 'POST'
-        });
-        isAuthenticated = false;
-        updateUIAuthState();
-        showSuccess('Logged out successfully');
-    } catch (error) {
-        console.error('Logout error:', error);
-        isAuthenticated = false;
-        updateUIAuthState();
-    }
-}
-
-function showLoginError(message) {
-    const errorDiv = document.getElementById('loginError');
-    if (errorDiv) {
-        errorDiv.textContent = message;
-        errorDiv.style.display = 'block';
-    }
-}
-
-function updateUIAuthState() {
-    const loginModal = document.getElementById('loginModal');
-    const loginBtn = document.getElementById('loginBtn');
-    const authSection = document.getElementById('authSection');
-    const logoutBtn = document.getElementById('logoutBtn');
-    const userGreeting = document.getElementById('userGreeting');
-
-    const addSegmentCard = document.getElementById('addSegmentCard');
-    const allocateCard = document.getElementById('allocateCard');
-    const bulkImportCard = document.getElementById('bulkImportCard');
-
-    const actionButtons = [
-        document.getElementById('addSegmentBtn'),
-        document.getElementById('allocateBtn'),
-        document.querySelector('button[onclick="importBulk()"]')
-    ];
-
-    const actionForms = [
-        document.getElementById('addSegmentForm'),
-        document.getElementById('allocateForm')
-    ];
-
-    if (isAuthenticated) {
-        if (loginModal) loginModal.style.display = 'none';
-
-        if (loginBtn) loginBtn.style.display = 'none';
-        if (authSection) {
-            authSection.style.display = 'flex';
-            authSection.style.alignItems = 'center';
-        }
-        if (userGreeting) userGreeting.textContent = 'Logged in';
-
-        if (addSegmentCard) addSegmentCard.style.display = 'block';
-        if (allocateCard) allocateCard.style.display = 'block';
-        if (bulkImportCard) bulkImportCard.style.display = 'block';
-
-        actionButtons.forEach(btn => {
-            if (btn) btn.disabled = false;
-        });
-
-        actionForms.forEach(form => {
-            if (form) {
-                const inputs = form.querySelectorAll('input, select, textarea, button');
-                inputs.forEach(input => {
-                    if (input.type !== 'submit') input.disabled = false;
-                });
+            updateSortHeaders();
+            loadSegments(false);
+        };
+        th.addEventListener("click", activateSort);
+        th.addEventListener("keydown", (e) => {
+            if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                activateSort();
             }
         });
-
-        const bulkImport = document.getElementById('bulkImport');
-        if (bulkImport) bulkImport.disabled = false;
-
-        loadSegments();
-    } else {
-        if (loginModal) loginModal.style.display = 'none';
-
-        if (loginBtn) loginBtn.style.display = 'inline-block';
-        if (authSection) authSection.style.display = 'none';
-
-        if (addSegmentCard) addSegmentCard.style.display = 'none';
-        if (allocateCard) allocateCard.style.display = 'none';
-        if (bulkImportCard) bulkImportCard.style.display = 'none';
-
-        loadSegments();
-    }
-}
-
-function showLoginModal() {
-    const loginModal = document.getElementById('loginModal');
-    if (loginModal) {
-        loginModal.style.display = 'block';
-        setTimeout(() => {
-            const usernameField = document.getElementById('loginUsername');
-            if (usernameField) usernameField.focus();
-        }, 100);
-    }
-}
-
-function closeLoginModal() {
-    const loginModal = document.getElementById('loginModal');
-    if (loginModal) {
-        loginModal.style.display = 'none';
-        const loginForm = document.getElementById('loginForm');
-        if (loginForm) loginForm.reset();
-        const loginError = document.getElementById('loginError');
-        if (loginError) loginError.style.display = 'none';
-    }
-}
-
-// Make functions globally accessible
-window.showLoginModal = showLoginModal;
-window.closeLoginModal = closeLoginModal;
-window.handleLogout = handleLogout;
-
-document.addEventListener('DOMContentLoaded', function() {
-    // Setup login button handler
-    document.getElementById('loginBtn').addEventListener('click', () => {
-        showLoginModal();
     });
 
-    // Setup login form handler
-    document.getElementById('loginForm').addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const username = document.getElementById('loginUsername').value;
-        const password = document.getElementById('loginPassword').value;
-
-        const submitBtn = e.target.querySelector('button[type="submit"]');
-        submitBtn.disabled = true;
-        submitBtn.textContent = 'Logging in...';
-
-        const success = await handleLogin(username, password);
-
-        submitBtn.disabled = false;
-        submitBtn.textContent = 'Login';
-
-        if (success) closeLoginModal();
-    });
-
-    // Setup logout button handler
-    document.getElementById('logoutBtn').addEventListener('click', async () => {
-        await handleLogout();
-    });
-
-    // Close login modal when clicking outside
-    document.addEventListener('click', (e) => {
-        const loginModal = document.getElementById('loginModal');
-        if (loginModal && e.target === loginModal) closeLoginModal();
-    });
-
-    // Check auth status on page load
-    checkAuthStatus();
-
-    document.getElementById('addSegmentForm').addEventListener('submit', async (e) => {
-        e.preventDefault();
-
-        const button = document.getElementById('addSegmentBtn');
-        button.disabled = true;
-
-        const segment = {
-            site: document.getElementById('segmentSite').value,
-            vlan_id: parseInt(document.getElementById('vlanId').value),
-            epg_name: document.getElementById('epgName').value,
-            segment: document.getElementById('networkSegment').value,
-            dhcp: document.getElementById('segmentDhcp').checked,
-            description: document.getElementById('segmentDescription').value
-        };
-
-        try {
-            await fetchAPI('/segments', {
-                method: 'POST',
-                body: JSON.stringify(segment)
+    // Status tabs
+    document.querySelectorAll(".segmented__tab").forEach((tab) => {
+        tab.addEventListener("click", (e) => {
+            currentFilter = e.currentTarget.getAttribute("data-filter");
+            document.querySelectorAll(".segmented__tab").forEach((t) => {
+                t.classList.remove("active");
+                t.setAttribute("aria-selected", "false");
             });
-
-            showSuccess('Segment created successfully');
-            e.target.reset();
-            await Promise.all([loadSegments(), loadStats()]);
-        } catch (error) {
-            showError(`Failed to create segment: ${error.message}`);
-        } finally {
-            button.disabled = false;
-        }
-    });
-
-    document.getElementById('allocateForm').addEventListener('submit', async (e) => {
-        e.preventDefault();
-
-        const button = document.getElementById('allocateBtn');
-        button.disabled = true;
-
-        const request = {
-            cluster_name: document.getElementById('clusterName').value,
-            site: document.getElementById('allocationSite').value
-        };
-
-        try {
-            const result = await fetchAPI('/allocate-vlan', {
-                method: 'POST',
-                body: JSON.stringify(request)
-            });
-
-            document.getElementById('allocationResult').innerHTML = `
-                <div style="padding: 15px; background: #48bb78; color: white; border-radius: 5px;">
-                    <strong>✓ Success!</strong><br>
-                    VLAN ID: <strong>${result.vlan_id}</strong><br>
-                    EPG: <strong>${result.epg_name}</strong><br>
-                    Network: <strong>${result.segment}</strong><br>
-                    Cluster: ${result.cluster_name}
-                </div>
-            `;
-
-            await Promise.all([loadSegments(), loadStats()]);
-        } catch (error) {
-            document.getElementById('allocationResult').innerHTML = `
-                <div style="padding: 15px; background: #f56565; color: white; border-radius: 5px;">
-                    <strong>✗ Error:</strong> ${error.message}
-                </div>
-            `;
-        } finally {
-            button.disabled = false;
-        }
-    });
-
-    // Tab switching
-    document.querySelectorAll('.tab').forEach(tab => {
-        tab.addEventListener('click', (e) => {
-            const filter = e.target.getAttribute('data-filter');
-            currentFilter = filter;
-
-            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-            e.target.classList.add('active');
-
-            loadSegments();
+            e.currentTarget.classList.add("active");
+            e.currentTarget.setAttribute("aria-selected", "true");
+            loadSegments(true);
         });
     });
 
     // Site filter
-    document.getElementById('siteFilter').addEventListener('change', (e) => {
+    document.getElementById("siteFilter").addEventListener("change", (e) => {
         currentSite = e.target.value;
-        loadSegments();
+        loadSegments(true);
     });
 
-    // Search functionality
-    const searchInput = document.getElementById('searchInput');
-    const clearSearch = document.getElementById('clearSearch');
+    // Search
+    const searchInput = document.getElementById("searchInput");
+    const clearSearch = document.getElementById("clearSearch");
     let searchTimeout;
 
-    searchInput.addEventListener('input', (e) => {
+    searchInput.addEventListener("input", (e) => {
         const query = e.target.value;
-
-        if (query.trim()) {
-            clearSearch.classList.add('visible');
-        } else {
-            clearSearch.classList.remove('visible');
-        }
+        clearSearch.classList.toggle("visible", query.trim().length > 0);
 
         clearTimeout(searchTimeout);
         searchTimeout = setTimeout(() => {
             currentSearchQuery = query;
-            loadSegments();
+            loadSegments(true);
         }, 300);
     });
 
-    searchInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') {
+    searchInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
             e.preventDefault();
             clearTimeout(searchTimeout);
             currentSearchQuery = e.target.value;
-            loadSegments();
+            loadSegments(true);
         }
     });
 
-    clearSearch.addEventListener('click', () => {
-        searchInput.value = '';
-        currentSearchQuery = '';
-        clearSearch.classList.remove('visible');
-        loadSegments();
+    clearSearch.addEventListener("click", () => {
+        searchInput.value = "";
+        currentSearchQuery = "";
+        clearSearch.classList.remove("visible");
+        searchInput.focus();
+        loadSegments(true);
     });
 
-    // Initialize application
-    async function init() {
-        try {
-            console.log('Initializing application...');
-            await checkAuthStatus();
-            await loadSites();
-            console.log('Sites loaded, loading stats and segments...');
-            await Promise.all([loadStats(), loadSegments()]);
-            console.log('Application initialized successfully');
-        } catch (error) {
-            console.error('Failed to initialize:', error);
-            showError('Failed to load initial data. Please refresh the page.');
+    // Column visibility ("funnel" picker)
+    loadHiddenColumns();
+    document.querySelectorAll('#columnsPopover input[type="checkbox"]').forEach((cb) => {
+        cb.checked = !hiddenColumns.has(cb.dataset.col);
+        cb.addEventListener("change", (e) => {
+            toggleColumn(e.target.dataset.col, e.target.checked);
+        });
+    });
+    applyColumnVisibility();
+
+    const columnsBtn = document.getElementById("columnsBtn");
+    const columnsPopover = document.getElementById("columnsPopover");
+    columnsBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        closeFilterPopover();
+        columnsPopover.hidden = !columnsPopover.hidden;
+        columnsBtn.setAttribute("aria-expanded", String(!columnsPopover.hidden));
+    });
+
+    // Advanced filter builder ("Add filter")
+    const addFilterBtn = document.getElementById("addFilterBtn");
+    const filterPopover = document.getElementById("filterPopover");
+
+    addFilterBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        columnsPopover.hidden = true;
+        columnsBtn.setAttribute("aria-expanded", "false");
+        if (filterPopover.hidden) openFilterPopover(null);
+        else closeFilterPopover();
+    });
+
+    document.getElementById("filterCancelBtn").addEventListener("click", closeFilterPopover);
+    document.getElementById("filterSaveBtn").addEventListener("click", saveFilter);
+    document.getElementById("addOrClauseBtn").addEventListener("click", () => {
+        if (draftClauses.length > 0) draftCombinator = "OR";
+        draftClauses.push(newClause("epg_name"));
+        renderFilterRows();
+    });
+    document.getElementById("addAndClauseBtn").addEventListener("click", () => {
+        if (draftClauses.length > 0) draftCombinator = "AND";
+        draftClauses.push(newClause("epg_name"));
+        renderFilterRows();
+    });
+
+    // Close popovers on outside click / Escape
+    document.addEventListener("click", (e) => {
+        const filterBar = document.getElementById("filterBar");
+        if (!filterPopover.hidden && filterBar && !filterBar.contains(e.target)) {
+            closeFilterPopover();
         }
-    }
+        const columnsPicker = document.getElementById("columnsPicker");
+        if (!columnsPopover.hidden && columnsPicker && !columnsPicker.contains(e.target)) {
+            columnsPopover.hidden = true;
+            columnsBtn.setAttribute("aria-expanded", "false");
+        }
+    });
+    document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") {
+            closeFilterPopover();
+            columnsPopover.hidden = true;
+            columnsBtn.setAttribute("aria-expanded", "false");
+        }
+    });
 
-    init();
+    // Click-to-copy (VLAN ID, EPG name, network segment cells)
+    const segmentsList = document.getElementById("segmentsList");
+    segmentsList.addEventListener("click", (e) => {
+        const cell = e.target.closest(".copyable");
+        if (cell) handleCopyableActivate(cell);
+    });
+    segmentsList.addEventListener("keydown", (e) => {
+        if (e.key !== "Enter" && e.key !== " ") return;
+        const cell = e.target.closest(".copyable");
+        if (!cell) return;
+        e.preventDefault();
+        handleCopyableActivate(cell);
+    });
 
-    // Auto-refresh data every 30 seconds
+    // First load
+    (async function init() {
+        await loadSites();
+        await Promise.all([loadStats(true), loadSegments(true)]);
+    })().catch(() => {
+        showError("Failed to load initial data. Please refresh the page.");
+    });
+
+    // Auto-refresh (silent, no skeleton)
     setInterval(() => {
         if (isOnline) {
-            loadStats();
-            loadSegments();
+            loadStats(false);
+            loadSegments(false);
         }
     }, 30000);
 
-    // Check connection status
+    // Connection heartbeat
     setInterval(async () => {
         try {
-            await fetchAPI('/health');
+            await fetchAPI("/health");
             updateConnectionStatus(true);
         } catch {
             updateConnectionStatus(false);
         }
     }, 10000);
-
-    initTheme();
 });
-
-// Edit segment functionality
-async function editSegment(segmentId) {
-    if (!isAuthenticated) {
-        showError('Please login to edit segments');
-        return;
-    }
-    try {
-        const segment = await fetchAPI(`/segments/${segmentId}`);
-        showEditModal(segment);
-    } catch (error) {
-        console.error('Failed to load segment for editing:', error);
-        showError('Failed to load segment details for editing');
-    }
-}
-
-function showEditModal(segment) {
-    const modalHTML = `
-        <div id="editModal" class="modal">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h3>Edit Segment</h3>
-                    <button class="close-modal" onclick="closeEditModal()">&times;</button>
-                </div>
-                <form id="editSegmentForm">
-                    <div class="form-group">
-                        <label for="editSite">Site</label>
-                        <select id="editSite" required>
-                            <option value="">Select site...</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label for="editVlanId">VLAN ID</label>
-                        <input type="number" id="editVlanId" min="1" max="4094" value="${segment.vlan_id}" required readonly>
-                    </div>
-                    <div class="form-group">
-                        <label for="editEpgName">EPG Name</label>
-                        <input type="text" id="editEpgName" value="${segment.epg_name}" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="editNetworkSegment">Network Segment</label>
-                        <input type="text" id="editNetworkSegment" value="${segment.segment}" required>
-                    </div>
-                    <div class="form-group">
-                        <label class="checkbox-label">
-                            <input type="checkbox" id="editDhcp" ${segment.dhcp ? 'checked' : ''}>
-                            <span>DHCP Enabled</span>
-                        </label>
-                    </div>
-                    <div class="form-group">
-                        <label for="editDescription">Description (Optional)</label>
-                        <input type="text" id="editDescription" value="${segment.description || ''}" placeholder="Optional description">
-                    </div>
-                    <div class="form-group">
-                        <label for="editClusterName">Cluster Name(s)</label>
-                        <input type="text" id="editClusterName" value="${segment.cluster_name || ''}" placeholder="cluster1,cluster2 for shared segments">
-                        <small style="color: #666; font-size: 12px;">Use commas to separate multiple clusters for shared segments. Leave empty to release allocation.</small>
-                    </div>
-                    <div class="modal-actions">
-                        <button type="button" class="btn btn-secondary" onclick="closeEditModal()">Cancel</button>
-                        <button type="submit" class="btn btn-primary">Update Segment</button>
-                    </div>
-                </form>
-            </div>
-        </div>
-    `;
-
-    document.body.insertAdjacentHTML('beforeend', modalHTML);
-
-    loadSitesForEdit(segment.site);
-
-    document.getElementById('editSegmentForm').addEventListener('submit', (e) => {
-        e.preventDefault();
-        updateSegment(segment._id);
-    });
-
-    document.getElementById('editModal').style.display = 'block';
-}
-
-async function loadSitesForEdit(selectedSite) {
-    try {
-        const data = await fetchAPI('/sites');
-        const select = document.getElementById('editSite');
-
-        select.innerHTML = '<option value="">Select site...</option>';
-        data.sites.forEach(site => {
-            const option = document.createElement('option');
-            option.value = site;
-            option.textContent = site;
-            if (site.toLowerCase() === (selectedSite || '').toLowerCase()) {
-                option.selected = true;
-            }
-            select.appendChild(option);
-        });
-    } catch (error) {
-        console.error('Failed to load sites for edit:', error);
-    }
-}
-
-async function updateSegment(segmentId) {
-    const form = document.getElementById('editSegmentForm');
-
-    const segmentData = {
-        site: document.getElementById('editSite').value,
-        vlan_id: parseInt(document.getElementById('editVlanId').value),
-        epg_name: document.getElementById('editEpgName').value.trim(),
-        segment: document.getElementById('editNetworkSegment').value.trim(),
-        dhcp: document.getElementById('editDhcp').checked,
-        description: document.getElementById('editDescription').value.trim()
-    };
-
-    const clusterField = document.getElementById('editClusterName');
-    const clusterName = clusterField.value.trim();
-
-    try {
-        const updateBtn = form.querySelector('button[type="submit"]');
-        updateBtn.disabled = true;
-        updateBtn.textContent = 'Updating...';
-
-        await fetchAPI(`/segments/${segmentId}/clusters`, {
-            method: 'PUT',
-            body: JSON.stringify({ cluster_names: clusterName })
-        });
-
-        await fetchAPI(`/segments/${segmentId}`, {
-            method: 'PUT',
-            body: JSON.stringify(segmentData)
-        });
-
-        closeEditModal();
-        showSuccess('Segment updated successfully');
-        await Promise.all([loadSegments(), loadStats()]);
-    } catch (error) {
-        console.error('Failed to update segment:', error);
-
-        if (error.detail && error.detail.error === 'vlan_id_immutable') {
-            showVlanIdImmutableError(error.detail);
-        } else {
-            showError('Failed to update segment: ' + error.message);
-        }
-    } finally {
-        const updateBtn = form.querySelector('button[type="submit"]');
-        if (updateBtn) {
-            updateBtn.disabled = false;
-            updateBtn.textContent = 'Update Segment';
-        }
-    }
-}
-
-function closeEditModal() {
-    const modal = document.getElementById('editModal');
-    if (modal) modal.remove();
-}
-
-// Close modal when clicking outside
-document.addEventListener('click', (e) => {
-    const modal = document.getElementById('editModal');
-    if (modal && e.target === modal) closeEditModal();
-});
-
-// Theme management
-function initTheme() {
-    const themeToggle = document.getElementById('themeToggle');
-    const themeIcon = document.getElementById('themeIcon');
-    const themeText = document.getElementById('themeText');
-
-    applyTheme(isDarkMode);
-
-    themeToggle.addEventListener('click', () => {
-        isDarkMode = !isDarkMode;
-        applyTheme(isDarkMode);
-        localStorage.setItem('darkMode', isDarkMode.toString());
-    });
-}
-
-function applyTheme(darkMode) {
-    const themeIcon = document.getElementById('themeIcon');
-    const themeText = document.getElementById('themeText');
-
-    if (darkMode) {
-        document.documentElement.setAttribute('data-theme', 'dark');
-        themeIcon.textContent = '☀️';
-        themeText.textContent = 'Light';
-    } else {
-        document.documentElement.removeAttribute('data-theme');
-        themeIcon.textContent = '🌙';
-        themeText.textContent = 'Dark';
-    }
-}

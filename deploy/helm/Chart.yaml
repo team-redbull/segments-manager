@@ -1,5 +1,5 @@
 apiVersion: v2
-name: vlan-manager
+name: segments-manager
 description: A FastAPI-based VLAN segment management system with site-specific IP validation and advanced filtering
 type: application
 version: 2.0.0
@@ -9,8 +9,8 @@ keywords:
   - network
   - management
   - fastapi
-home: https://github.com/your-org/vlan-manager
+home: https://github.com/team-redbull/segments-manager
 sources:
-  - https://github.com/your-org/vlan-manager
+  - https://github.com/team-redbull/segments-manager
 maintainers:
-  - name: VLAN Manager Team
+  - name: Segments Manager Team
