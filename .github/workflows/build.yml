@@ -3,6 +3,7 @@ name: Build and Push
 on:
   push:
     branches: [ '**' ]
+  delete:
 
 permissions:
   contents: write
@@ -10,8 +11,16 @@ permissions:
 
 jobs:
   build:
+    if: github.event_name == 'push'
     uses: team-redbull/.github/.github/workflows/ghcr-build-push.yml@main
     with:
       image-name: segments-manager
       helm-values-path: deploy/helm/values.yaml
+    secrets: inherit
+
+  cleanup-on-delete:
+    if: github.event_name == 'delete'
+    uses: team-redbull/.github/.github/workflows/ghcr-cleanup-on-delete.yml@main
+    with:
+      image-name: segments-manager
     secrets: inherit
