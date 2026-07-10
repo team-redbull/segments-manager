@@ -1,0 +1,33 @@
+name: GHCR cleanup - branch deleted
+
+# Removes every image tag belonging to a branch as soon as that branch ref
+# is deleted (manual delete, or GitHub auto-deleting the head branch on
+# merge). Does not fire on PR close alone - only on the actual ref delete.
+
+on:
+  delete:
+
+jobs:
+  cleanup:
+    if: github.event.ref_type == 'branch' && github.event.ref != 'main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete all image tags for the deleted branch
+        env:
+          GH_TOKEN: ${{ secrets.GHCR_CLEANUP_TOKEN }}
+          BRANCH: ${{ github.event.ref }}
+        run: |
+          set -euo pipefail
+          OWNER="team-redbull"
+          PACKAGE="segments-manager"
+          SLUG=$(echo "$BRANCH" | tr -c 'a-zA-Z0-9' '-' | tr 'A-Z' 'a-z' | sed 's/-\+/-/g; s/^-//; s/-$//')
+
+          gh api --paginate "/orgs/${OWNER}/packages/container/${PACKAGE}/versions?per_page=100" \
+          | jq -r --arg slug "$SLUG" '
+              .[] | select(.metadata.container.tags | length > 0)
+              | select((.metadata.container.tags[0] | sub("-[0-9a-f]{7,40}$"; "")) == $slug)
+              | "\(.id)\t\(.metadata.container.tags[0])"
+            ' | while IFS=$'\t' read -r id tag; do
+              echo "Deleting version $id (tag: $tag, branch $BRANCH deleted)"
+              gh api -X DELETE "/orgs/${OWNER}/packages/container/${PACKAGE}/versions/${id}"
+            done
