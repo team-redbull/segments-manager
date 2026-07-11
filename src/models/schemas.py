@@ -11,8 +11,7 @@ class Segment(BaseModel):
     vlan_id: int = Field(ge=1, le=4094, description="VLAN ID (1-4094)", examples=[100])
     epg_name: str = Field(..., description="Endpoint Group name", examples=["EPG_PROD_01"])
     segment: str = Field(..., description="Network segment in CIDR notation (must match site IP prefix)", examples=["192.168.1.0/24"])
-    dhcp: bool = Field(default=False, description="Enable DHCP for this segment")
-    description: Optional[str] = Field(default="", description="Optional description for this segment", examples=["Production web servers"])
+    dhcp: bool = Field(default=True, description="Enable DHCP for this segment")
     cluster_name: Optional[str] = Field(default=None, description="Cluster name if allocated, None if available", examples=["cluster-prod-01"])
     allocated_at: Optional[datetime] = Field(default=None, description="Timestamp when segment was allocated")
     released: bool = Field(default=False, description="Whether segment was previously released")
@@ -28,17 +27,16 @@ class Segment(BaseModel):
                     "vlan_id": 100,
                     "epg_name": "EPG_PROD_01",
                     "segment": "192.168.1.0/24",
-                    "dhcp": False,
-                    "description": "Production web servers"
+                    "dhcp": True
                 }
             ]
         }
     }
 
 
-class VLANAllocationRequest(BaseModel):
+class SegmentAllocationRequest(BaseModel):
     cluster_name: str = Field(..., description="Name of the cluster requesting allocation", examples=["cluster-prod-01"])
-    site: str = Field(..., description="Site where VLAN should be allocated", examples=["site1"])
+    site: str = Field(..., description="Site where the segment should be allocated", examples=["site1"])
 
     model_config = {
         "extra": "forbid",
@@ -53,7 +51,7 @@ class VLANAllocationRequest(BaseModel):
     }
 
 
-class VLANAllocationResponse(BaseModel):
+class SegmentAllocationResponse(BaseModel):
     vlan_id: int = Field(..., description="Allocated VLAN ID", examples=[100])
     cluster_name: str = Field(..., description="Cluster name", examples=["cluster-prod-01"])
     site: str = Field(..., description="Site name", examples=["site1"])
@@ -77,7 +75,7 @@ class VLANAllocationResponse(BaseModel):
     }
 
 
-class VLANRelease(BaseModel):
+class SegmentRelease(BaseModel):
     cluster_name: str = Field(..., description="Name of the cluster to release", examples=["cluster-prod-01"])
     site: str = Field(..., description="Site where cluster is allocated", examples=["site1"])
 
@@ -92,20 +90,3 @@ class VLANRelease(BaseModel):
             ]
         }
     }
-
-
-
-
-class LoginRequest(BaseModel):
-    username: str = Field(..., description="Username", examples=["admin"])
-    password: str = Field(..., description="Password", examples=["admin"])
-
-
-class LoginResponse(BaseModel):
-    success: bool = Field(..., description="Whether login was successful")
-    message: str = Field(..., description="Response message")
-    token: Optional[str] = Field(None, description="Session token for API authentication (use as Bearer token)")
-
-
-class AuthStatusResponse(BaseModel):
-    authenticated: bool = Field(..., description="Whether user is authenticated")

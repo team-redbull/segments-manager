@@ -29,6 +29,8 @@ echo ""
 SEGMENTS_MANAGER_URL="${SEGMENTS_MANAGER_URL}"
 SEGMENTS_MANAGER_TIMEOUT="${SEGMENTS_MANAGER_TIMEOUT}"
 SEGMENTS_MANAGER_RETRIES="${SEGMENTS_MANAGER_RETRIES}"
+# API token for write requests (sent as: Authorization: Bearer <token>)
+SEGMENTS_MANAGER_API_TOKEN="${SEGMENTS_MANAGER_API_TOKEN}"
 
 # Colors for output
 GREEN='\033[0;32m'
@@ -133,7 +135,8 @@ allocate_vlan() {
     response=$(curl -s -w "\n%{http_code}" \
       --connect-timeout "${SEGMENTS_MANAGER_TIMEOUT}" \
       --max-time "${SEGMENTS_MANAGER_TIMEOUT}" \
-      -X POST "${SEGMENTS_MANAGER_URL}/api/allocate-vlan" \
+      -X POST "${SEGMENTS_MANAGER_URL}/api/allocate-segment" \
+      -H "Authorization: Bearer ${SEGMENTS_MANAGER_API_TOKEN}" \
       -H "Content-Type: application/json" \
       -d "{\"cluster_name\":\"${cluster_name}\",\"site\":\"${site}\"}" \
       2>/dev/null)
@@ -231,7 +234,7 @@ if check_segments_manager_health; then
   SEGMENTS_MANAGER_AVAILABLE=true
 else
   echo -e "${YELLOW}[WARNING]${NC} Segments Manager is not available. Clusters will be created without VLAN allocation."
-  echo -e "${YELLOW}[WARNING]${NC} You can manually allocate VLANs later using: POST ${SEGMENTS_MANAGER_URL}/api/allocate-vlan"
+  echo -e "${YELLOW}[WARNING]${NC} You can manually allocate VLANs later using: POST ${SEGMENTS_MANAGER_URL}/api/allocate-segment"
   exit 0  # Exit gracefully without failing the pipeline
 fi
 

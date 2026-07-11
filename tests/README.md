@@ -17,14 +17,14 @@ The suite is driven by environment variables (all optional):
 | Variable | Default | Meaning |
 |----------|---------|---------|
 | `SEGMENTS_MANAGER_URL` | `http://127.0.0.1:8000` | Base URL of the running server |
-| `VLAN_AUTH_USER` | `admin` | Basic-auth username |
-| `VLAN_AUTH_PASS` | `admin` | Basic-auth password |
+| `SEGMENTS_MANAGER_API_TOKEN` | `test-token` | API token sent as `Authorization: Bearer` on write requests — **must match the server's `API_TOKEN`** |
 
 The server under test must be configured with:
 
 ```
 SITES=site1,site2,site3
 SITE_PREFIXES=site1:192,site2:193,site3:194
+API_TOKEN=test-token
 ```
 
 If the server is unreachable, the whole suite **skips** (it does not fail).
@@ -37,6 +37,7 @@ If the server is unreachable, the whole suite **skips** (it does not fail).
 # terminal 1 — start the app (needs a MongoDB)
 MONGODB_URL=mongodb://localhost:27017 \
 SITES=site1,site2,site3 SITE_PREFIXES=site1:192,site2:193,site3:194 \
+API_TOKEN=test-token \
 python main.py
 
 # terminal 2
@@ -55,6 +56,7 @@ podman run -d --name segments-manager --network host \
   -e MONGODB_URL="mongodb://127.0.0.1:27017" \
   -e SITES="site1,site2,site3" \
   -e SITE_PREFIXES="site1:192,site2:193,site3:194" \
+  -e API_TOKEN="test-token" \
   docker.io/roi12345/segments-manager:mongodb
 
 # run the tests against it

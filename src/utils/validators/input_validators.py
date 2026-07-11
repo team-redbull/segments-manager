@@ -1,6 +1,6 @@
 """Input field validators for Segments Manager.
 
-Handles validation of basic input fields like site, VLAN ID, EPG name, cluster name, and description.
+Handles validation of basic input fields like site, VLAN ID, EPG name, and cluster name.
 """
 
 import logging
@@ -113,28 +113,4 @@ class InputValidators:
             raise HTTPException(
                 status_code=400,
                 detail="Cluster name can only contain letters, numbers, hyphens, underscores, and dots"
-            )
-
-    @staticmethod
-    def validate_description(description: str) -> None:
-        """Validate description field"""
-        if not description:
-            # Empty descriptions are allowed
-            return
-
-        logger.debug(f"Validating description: '{description[:50]}...'")
-
-        if len(description) > 500:
-            logger.warning(f"Description too long: {len(description)} characters")
-            raise HTTPException(
-                status_code=400,
-                detail=f"Description too long (max 500 characters, got {len(description)})"
-            )
-
-        # Check for control characters (except newlines and tabs)
-        if re.search(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]', description):
-            logger.warning("Description contains invalid control characters")
-            raise HTTPException(
-                status_code=400,
-                detail="Description contains invalid control characters"
             )

@@ -99,6 +99,12 @@ spec:
                 secretKeyRef:
                   name: {{ if .Values.mongodb.existingSecret }}{{ .Values.mongodb.existingSecret }}{{ else }}{{ include "segments-manager.fullname" . }}-mongodb{{ end }}
                   key: {{ if .Values.mongodb.existingSecret }}{{ .Values.mongodb.existingSecretKey }}{{ else }}mongodb-url{{ end }}
+            # API token from Secret (required for write requests)
+            - name: API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ if .Values.auth.existingSecret }}{{ .Values.auth.existingSecret }}{{ else }}{{ include "segments-manager.fullname" . }}-auth{{ end }}
+                  key: {{ if .Values.auth.existingSecret }}{{ .Values.auth.existingSecretKey }}{{ else }}api-token{{ end }}
           {{- with .Values.startupProbe }}
           startupProbe:
             {{- toYaml . | nindent 12 }}

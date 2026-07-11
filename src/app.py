@@ -1,14 +1,14 @@
 from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import HTMLResponse, Response, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 
 from .config.settings import setup_logging, SITES, validate_site_prefixes
 from .api.routes import router
 from .database import init_storage, close_storage
-from .auth.auth import init_sessions
+from .auth.auth import is_authenticated
 import os
 
 # Setup logging
@@ -18,10 +18,6 @@ logger = setup_logging()
 async def lifespan(app: FastAPI):
     # Startup
     try:
-        # Initialize session storage (loads from file)
-        logger.info("Initializing session storage...")
-        init_sessions()
-
         # Validate site prefixes configuration before anything else
         logger.info("Validating site prefixes configuration...")
         validate_site_prefixes()
@@ -65,7 +61,37 @@ class CachedStaticFiles(StaticFiles):
 # Mount static files with caching
 app.mount("/static", CachedStaticFiles(directory="static"), name="static")
 
-# CORS middleware
+# Read (GET/HEAD) API calls stay open so the web UI needs no authentication;
+# every mutating call must present a valid API token via the Authorization
+# header. There is no username/password login — the token is the only credential.
+_PUBLIC_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+
+@app.middleware("http")
+async def enforce_api_auth(request: Request, call_next):
+    """Require a valid API token for all mutating /api/* requests.
+
+    Enforced centrally (fail-closed) so any new write endpoint is protected by
+    default. Clients send an `Authorization: Bearer <API_TOKEN>` header.
+    """
+    if (
+        request.url.path.startswith("/api/")
+        and request.method not in _PUBLIC_METHODS
+        and not is_authenticated(request)
+    ):
+        return JSONResponse(
+            status_code=401,
+            content={
+                "detail": "Authentication required. Provide a valid API token via "
+                "'Authorization: Bearer <token>'."
+            },
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return await call_next(request)
+
+
+# CORS middleware — added last so it stays the outermost layer and applies its
+# headers to every response, including preflight and the 401s above.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],

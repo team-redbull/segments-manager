@@ -89,7 +89,14 @@
       "Bash(grep -E '\\(sk-[a-zA-Z0-9]{20,}|sk_live_[a-zA-Z0-9]+|sk_test_[a-zA-Z0-9]+|ghp_[a-zA-Z0-9]{36}|gho_[a-zA-Z0-9]{36}|glpat-[a-zA-Z0-9_-]+|AKIA[A-Z0-9]{16}|xox[baprs]-[a-zA-Z0-9-]+|-----BEGIN.*PRIVATE KEY|eyJ[a-zA-Z0-9_-]+\\\\.eyJ[a-zA-Z0-9_-]+\\\\.\\)' .planning/codebase/*.md)",
       "Bash(node /Users/roiblum/.claude/get-shit-done/bin/gsd-tools.cjs commit \"docs: map existing codebase\" --files .planning/codebase/STACK.md .planning/codebase/INTEGRATIONS.md .planning/codebase/ARCHITECTURE.md .planning/codebase/STRUCTURE.md .planning/codebase/CONVENTIONS.md .planning/codebase/TESTING.md .planning/codebase/CONCERNS.md)",
       "Bash(node /Users/roiblum/.claude/get-shit-done/bin/gsd-tools.cjs commit \"chore: add project config\" --files .planning/config.json)",
-      "Bash(node /Users/roiblum/.claude/get-shit-done/bin/gsd-tools.cjs commit \"docs: complete project research\" --files .planning/research/)"
+      "Bash(node /Users/roiblum/.claude/get-shit-done/bin/gsd-tools.cjs commit \"docs: complete project research\" --files .planning/research/)",
+      "Bash(python3 -m py_compile src/models/schemas.py src/api/routes.py src/services/allocation_service.py src/services/segment_service.py src/services/export_service.py src/database/mongo_segments.py src/utils/database/segment_queries.py src/utils/validators/input_validators.py src/utils/validators/__init__.py tests/test_api.py tests/conftest.py)",
+      "Bash(node -e \"require\\('fs'\\).readFileSync\\('static/js/app.js','utf8'\\); new Function\\(require\\('fs'\\).readFileSync\\('static/js/app.js','utf8'\\)\\);\")",
+      "Bash(.venv/bin/python -c \"import motor, fastapi, pydantic; print\\('venv has deps'\\)\")",
+      "Bash(python3 -m venv v)",
+      "Bash(./v/bin/pip -q install \"pydantic>=2\")",
+      "Bash(git --no-pager diff --stat)",
+      "Bash(git --no-pager diff src/api/routes.py src/services/allocation_service.py src/database/mongo_segments.py src/services/segment_service.py)"
     ],
     "deny": [],
     "ask": []

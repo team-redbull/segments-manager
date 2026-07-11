@@ -2,7 +2,7 @@ import logging
 from typing import Dict, Any
 from fastapi import HTTPException
 
-from ..models.schemas import VLANAllocationRequest, VLANAllocationResponse
+from ..models.schemas import SegmentAllocationRequest, SegmentAllocationResponse
 from ..utils.database_utils import DatabaseUtils
 from ..utils.validators import Validators
 from ..utils.error_handlers import handle_db_errors, retry_on_network_error
@@ -16,8 +16,8 @@ class AllocationService:
     @staticmethod
     @handle_db_errors
     @retry_on_network_error(max_retries=3)
-    @log_operation_timing("allocate_vlan", threshold_ms=2000)
-    async def allocate_vlan(request: VLANAllocationRequest) -> VLANAllocationResponse:
+    @log_operation_timing("allocate_segment", threshold_ms=2000)
+    async def allocate_segment(request: SegmentAllocationRequest) -> SegmentAllocationResponse:
         """Allocate a VLAN segment for a cluster at a site."""
         logger.info(f"Allocation request: cluster={request.cluster_name}, site={request.site}")
 
@@ -29,7 +29,7 @@ class AllocationService:
 
         if existing:
             logger.info(f"Returning existing allocation: VLAN {existing['vlan_id']} for {request.cluster_name}")
-            return VLANAllocationResponse(
+            return SegmentAllocationResponse(
                 vlan_id=existing["vlan_id"],
                 cluster_name=existing["cluster_name"],
                 site=existing["site"],
@@ -49,7 +49,7 @@ class AllocationService:
 
         logger.info(f"Allocated VLAN {allocated_segment['vlan_id']} (EPG: {allocated_segment['epg_name']}) to {request.cluster_name}")
 
-        return VLANAllocationResponse(
+        return SegmentAllocationResponse(
             vlan_id=allocated_segment["vlan_id"],
             cluster_name=request.cluster_name,
             site=request.site,
@@ -61,8 +61,8 @@ class AllocationService:
     @staticmethod
     @handle_db_errors
     @retry_on_network_error(max_retries=3)
-    @log_operation_timing("release_vlan", threshold_ms=2000)
-    async def release_vlan(cluster_name: str, site: str) -> Dict[str, str]:
+    @log_operation_timing("release_segment", threshold_ms=2000)
+    async def release_segment(cluster_name: str, site: str) -> Dict[str, str]:
         """Release a VLAN segment allocation."""
         logger.info(f"Release request: cluster={cluster_name}, site={site}")
 
@@ -74,5 +74,5 @@ class AllocationService:
         if not success:
             raise HTTPException(status_code=404, detail="Allocation not found")
 
-        logger.info(f"Released VLAN for {cluster_name} at {site}")
-        return {"message": "VLAN released successfully"}
+        logger.info(f"Released segment for {cluster_name} at {site}")
+        return {"message": "Segment released successfully"}

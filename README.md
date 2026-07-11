@@ -100,12 +100,11 @@ SERVER_HOST=0.0.0.0
 SERVER_PORT=8000
 LOG_LEVEL=INFO
 
-# Auth (Optional; default admin/admin)
-AUTH_USERNAME=admin
-AUTH_PASSWORD=admin
+# Auth
+API_TOKEN=change-me-to-a-long-random-secret   # REQUIRED — the only credential for write requests
 ```
 
-**Fail-fast validation**: the app crashes at startup if `MONGODB_URL` is unset or if any site in `SITES` lacks a `SITE_PREFIXES` entry.
+**Fail-fast validation**: the app crashes at startup if `MONGODB_URL` or `API_TOKEN` is unset, or if any site in `SITES` lacks a `SITE_PREFIXES` entry.
 
 ---
 
@@ -114,30 +113,32 @@ AUTH_PASSWORD=admin
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET  | `/api/segments` | List segments (filter by `site`, `allocated`) |
-| GET  | `/api/segments/search?q=` | Search by cluster, EPG, VLAN, description, segment |
+| GET  | `/api/segments/search?q=` | Search by cluster, EPG, VLAN, segment |
 | POST | `/api/segments` | Create a segment *(auth)* |
 | GET  | `/api/segments/{id}` | Get one segment |
 | PUT  | `/api/segments/{id}` | Update a segment *(auth)* |
 | PUT  | `/api/segments/{id}/clusters` | Update cluster assignment *(auth)* |
 | DELETE | `/api/segments/{id}` | Delete a segment *(auth)* |
 | POST | `/api/segments/bulk` | Bulk create *(auth)* |
-| POST | `/api/allocate-vlan` | Allocate a VLAN for a cluster *(auth)* |
-| POST | `/api/release-vlan` | Release a cluster's allocation *(auth)* |
+| POST | `/api/allocate-segment` | Allocate a segment for a cluster *(auth)* |
+| POST | `/api/release-segment` | Release a cluster's allocation *(auth)* |
 | GET  | `/api/sites` | Configured sites |
 | GET  | `/api/stats` | Per-site statistics |
 | GET  | `/api/health` | Health check (MongoDB connectivity) |
 | GET  | `/api/export/segments/{csv,excel}` | Export segments |
 
-Auth is HTTP Basic (or session cookie via `/api/auth/login`). Example:
+**Read (`GET`) endpoints are open; every write (`POST`/`PUT`/`PATCH`/`DELETE`) requires the API token** as a `Authorization: Bearer <API_TOKEN>` header. The token is the only credential — there is no username/password login. Example:
 
 ```bash
 # Create a segment
-curl -u admin:admin -X POST http://localhost:8000/api/segments \
+curl -X POST http://localhost:8000/api/segments \
+  -H "Authorization: Bearer $API_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"site":"site1","vlan_id":100,"epg_name":"EPG_PROD_01","segment":"192.168.1.0/24","dhcp":false}'
+  -d '{"site":"site1","vlan_id":100,"epg_name":"EPG_PROD_01","segment":"192.168.1.0/24","dhcp":true}'
 
 # Allocate for a cluster
-curl -u admin:admin -X POST http://localhost:8000/api/allocate-vlan \
+curl -X POST http://localhost:8000/api/allocate-segment \
+  -H "Authorization: Bearer $API_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"cluster_name":"web-cluster","site":"site1"}'
 ```
@@ -174,8 +175,7 @@ Collection `segments`:
   "vlan_id": 100,
   "epg_name": "EPG_PROD_01",
   "segment": "192.168.1.0/24",
-  "dhcp": false,
-  "description": "",
+  "dhcp": true,
   "cluster_name": null,
   "allocated_at": null,
   "released": false,

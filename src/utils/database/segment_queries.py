@@ -61,7 +61,7 @@ class SegmentQueries:
         def _matches_search(s: dict) -> bool:
             if vlan_id_search is not None and s.get("vlan_id") == vlan_id_search:
                 return True
-            for field in ("cluster_name", "epg_name", "description", "segment"):
+            for field in ("cluster_name", "epg_name", "segment"):
                 if pattern.search(str(s.get(field) or "")):
                     return True
             return False

@@ -76,6 +76,17 @@ mongodb:
   existingSecret: ""
   existingSecretKey: "mongodb-url"
 
+# Authentication
+auth:
+  # API token - REQUIRED (stored in a Secret). Clients send it as
+  # `Authorization: Bearer <token>` on every write (POST/PUT/PATCH/DELETE)
+  # request; GET requests are open. Set a long, random secret before deploying.
+  apiToken: "7f3a8b9c-2e1d-4f5a-b6c7-8d9e0f1a2b3c"
+
+  # Use an existing secret for the API token (optional)
+  existingSecret: ""
+  existingSecretKey: "api-token"
+
 # Persistent Volume Claim
 persistence:
   enabled: false

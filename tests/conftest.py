@@ -3,13 +3,15 @@
 These tests run against a LIVE server (local `python main.py` or the
 container image). Configure the target with environment variables:
 
-    SEGMENTS_MANAGER_URL   base URL (default: http://127.0.0.1:8000)
-    VLAN_AUTH_USER     basic-auth user (default: admin)
-    VLAN_AUTH_PASS     basic-auth pass (default: admin)
+    SEGMENTS_MANAGER_URL       base URL (default: http://127.0.0.1:8000)
+    SEGMENTS_MANAGER_API_TOKEN  API token for write requests (must match the
+                                server's API_TOKEN; falls back to $API_TOKEN,
+                                then "test-token")
 
 The suite assumes the server is configured with:
     SITES=site1,site2,site3
     SITE_PREFIXES=site1:192,site2:193,site3:194
+    API_TOKEN=test-token   (or match SEGMENTS_MANAGER_API_TOKEN)
 """
 
 import os
@@ -21,7 +23,8 @@ import requests
 
 BASE_URL = os.getenv("SEGMENTS_MANAGER_URL", "http://127.0.0.1:8000").rstrip("/")
 API = f"{BASE_URL}/api"
-AUTH = (os.getenv("VLAN_AUTH_USER", "admin"), os.getenv("VLAN_AUTH_PASS", "admin"))
+API_TOKEN = os.getenv("SEGMENTS_MANAGER_API_TOKEN") or os.getenv("API_TOKEN", "test-token")
+AUTH_HEADERS = {"Authorization": f"Bearer {API_TOKEN}"}
 TIMEOUT = 15
 
 # First IP octet per site (must match the server's SITE_PREFIXES config).
@@ -61,7 +64,7 @@ def api():
 
 @pytest.fixture
 def auth():
-    return AUTH
+    return AUTH_HEADERS
 
 
 @pytest.fixture
@@ -82,14 +85,14 @@ def segment_factory():
     def _create(**body):
         keep_locked = body.pop("keep_locked", False)
         body.setdefault("dhcp", False)
-        r = requests.post(f"{API}/segments", json=body, auth=AUTH, timeout=TIMEOUT)
+        r = requests.post(f"{API}/segments", json=body, headers=AUTH_HEADERS, timeout=TIMEOUT)
         if r.status_code == 200 and "id" in r.json():
             sid = r.json()["id"]
             created_ids.append(sid)
             if not keep_locked:
                 requests.post(
                     f"{API}/segments/{sid}/unlock",
-                    auth=AUTH,
+                    headers=AUTH_HEADERS,
                     timeout=TIMEOUT,
                 )
         return r
@@ -98,7 +101,7 @@ def segment_factory():
 
     for sid in created_ids:
         try:
-            requests.delete(f"{API}/segments/{sid}", auth=AUTH, timeout=TIMEOUT)
+            requests.delete(f"{API}/segments/{sid}", headers=AUTH_HEADERS, timeout=TIMEOUT)
         except requests.RequestException:
             pass
 
@@ -116,9 +119,9 @@ def release_cluster():
     for cluster_name, site in allocated:
         try:
             requests.post(
-                f"{API}/release-vlan",
+                f"{API}/release-segment",
                 json={"cluster_name": cluster_name, "site": site},
-                auth=AUTH,
+                headers=AUTH_HEADERS,
                 timeout=TIMEOUT,
             )
         except requests.RequestException:

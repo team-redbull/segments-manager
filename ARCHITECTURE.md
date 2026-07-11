@@ -58,7 +58,7 @@
 ## Layer Breakdown
 
 ### API Layer — `src/api/routes.py`
-Thin FastAPI handlers. Each route validates auth (HTTP Basic or session cookie via `require_auth`), deserializes into a Pydantic model, and delegates to a service. Request models use `extra="forbid"`, so unknown fields (e.g. a legacy `vrf`) are rejected with HTTP 422.
+Thin FastAPI handlers. They deserialize into a Pydantic model and delegate to a service. Authentication is handled centrally by a middleware in `src/app.py` (mutating requests require an `Authorization: Bearer <API_TOKEN>` header; `GET` is open), not per-route. Request models use `extra="forbid"`, so unknown fields (e.g. a legacy `vrf`) are rejected with HTTP 422.
 
 ### Service Layer — `src/services/`
 Business logic and orchestration:

@@ -14,7 +14,7 @@ import uuid
 
 import requests
 
-from conftest import API, AUTH, TIMEOUT, next_vlan, cidr_for
+from conftest import API, AUTH_HEADERS, TIMEOUT, next_vlan, cidr_for
 
 
 def _uid(prefix="EPG"):
@@ -61,7 +61,7 @@ class TestAuthRequired:
 
     def test_allocate_requires_auth(self):
         body = {"cluster_name": "noauth-cluster", "site": "site1"}
-        assert requests.post(f"{API}/allocate-vlan", json=body, timeout=TIMEOUT).status_code == 401
+        assert requests.post(f"{API}/allocate-segment", json=body, timeout=TIMEOUT).status_code == 401
 
     def test_delete_requires_auth(self):
         assert requests.delete(f"{API}/segments/deadbeefdeadbeefdeadbeef", timeout=TIMEOUT).status_code == 401
@@ -131,7 +131,7 @@ class TestSegmentType:
         v = next_vlan()
         body = {"site": "site1", "vlan_id": v, "epg_name": _uid(),
                 "segment": cidr_for("site1", v), "dhcp": False}
-        r = requests.post(f"{API}/segments", json=body, auth=AUTH, timeout=TIMEOUT)
+        r = requests.post(f"{API}/segments", json=body, headers=AUTH_HEADERS, timeout=TIMEOUT)
         assert r.status_code == 200, r.text
 
         got = requests.get(f"{API}/segments/{r.json()['id']}", timeout=TIMEOUT)
@@ -161,8 +161,7 @@ class TestSegmentCRUD:
         v = next_vlan()
         epg = _uid()
         seg = cidr_for("site1", v)
-        r = segment_factory(site="site1", vlan_id=v, epg_name=epg, segment=seg,
-                            description="crud test")
+        r = segment_factory(site="site1", vlan_id=v, epg_name=epg, segment=seg)
         assert r.status_code == 200, r.text
         sid = r.json()["id"]
 
@@ -179,7 +178,7 @@ class TestSegmentCRUD:
         assert all("vrf" not in s for s in lst)
 
         # delete
-        d = requests.delete(f"{API}/segments/{sid}", auth=AUTH, timeout=TIMEOUT)
+        d = requests.delete(f"{API}/segments/{sid}", headers=AUTH_HEADERS, timeout=TIMEOUT)
         assert d.status_code == 200
 
     def test_update_segment(self, segment_factory):
@@ -191,8 +190,8 @@ class TestSegmentCRUD:
 
         new_epg = _uid("UPD")
         body = {"type": "MCE", "site": "site1", "vlan_id": v, "epg_name": new_epg,
-                "segment": seg, "dhcp": True, "description": "updated"}
-        u = requests.put(f"{API}/segments/{sid}", json=body, auth=AUTH, timeout=TIMEOUT)
+                "segment": seg, "dhcp": True}
+        u = requests.put(f"{API}/segments/{sid}", json=body, headers=AUTH_HEADERS, timeout=TIMEOUT)
         assert u.status_code == 200, u.text
         assert requests.get(f"{API}/segments/{sid}", timeout=TIMEOUT).json()["epg_name"] == new_epg
 
@@ -242,32 +241,32 @@ class TestAllocation:
         cluster = f"it-cluster-{uuid.uuid4().hex[:6]}"
         release_cluster(cluster, "site1")
 
-        a1 = requests.post(f"{API}/allocate-vlan",
+        a1 = requests.post(f"{API}/allocate-segment",
                            json={"cluster_name": cluster, "site": "site1"},
-                           auth=AUTH, timeout=TIMEOUT)
+                           headers=AUTH_HEADERS, timeout=TIMEOUT)
         assert a1.status_code == 200, a1.text
         data = a1.json()
         assert "vlan_id" in data
         assert "vrf" not in data
 
         # idempotent: re-allocating the same cluster returns the same VLAN
-        a2 = requests.post(f"{API}/allocate-vlan",
+        a2 = requests.post(f"{API}/allocate-segment",
                            json={"cluster_name": cluster, "site": "site1"},
-                           auth=AUTH, timeout=TIMEOUT)
+                           headers=AUTH_HEADERS, timeout=TIMEOUT)
         assert a2.status_code == 200
         assert a2.json()["vlan_id"] == data["vlan_id"]
 
         # release
-        rel = requests.post(f"{API}/release-vlan",
+        rel = requests.post(f"{API}/release-segment",
                             json={"cluster_name": cluster, "site": "site1"},
-                            auth=AUTH, timeout=TIMEOUT)
+                            headers=AUTH_HEADERS, timeout=TIMEOUT)
         assert rel.status_code == 200
         assert "released" in rel.text.lower()
 
     def test_release_unknown_cluster_404(self):
-        r = requests.post(f"{API}/release-vlan",
+        r = requests.post(f"{API}/release-segment",
                           json={"cluster_name": f"nope-{uuid.uuid4().hex[:6]}", "site": "site1"},
-                          auth=AUTH, timeout=TIMEOUT)
+                          headers=AUTH_HEADERS, timeout=TIMEOUT)
         assert r.status_code == 404
 
 
@@ -298,9 +297,9 @@ class TestSegmentLocking:
         cluster = f"it-locktest-{uuid.uuid4().hex[:6]}"
         release_cluster(cluster, "site3")
 
-        a1 = requests.post(f"{API}/allocate-vlan",
+        a1 = requests.post(f"{API}/allocate-segment",
                            json={"cluster_name": cluster, "site": "site3"},
-                           auth=AUTH, timeout=TIMEOUT)
+                           headers=AUTH_HEADERS, timeout=TIMEOUT)
         assert a1.status_code == 200, a1.text
         assert a1.json()["segment"] != locked_segment_value
 
@@ -311,7 +310,7 @@ class TestSegmentLocking:
         assert r.status_code == 200, r.text
         sid = r.json()["id"]
 
-        unlock = requests.post(f"{API}/segments/{sid}/unlock", auth=AUTH, timeout=TIMEOUT)
+        unlock = requests.post(f"{API}/segments/{sid}/unlock", headers=AUTH_HEADERS, timeout=TIMEOUT)
         assert unlock.status_code == 200, unlock.text
 
         got = requests.get(f"{API}/segments/{sid}", timeout=TIMEOUT)
@@ -319,9 +318,9 @@ class TestSegmentLocking:
 
         cluster = f"it-unlocktest-{uuid.uuid4().hex[:6]}"
         release_cluster(cluster, "site1")
-        alloc = requests.post(f"{API}/allocate-vlan",
+        alloc = requests.post(f"{API}/allocate-segment",
                               json={"cluster_name": cluster, "site": "site1"},
-                              auth=AUTH, timeout=TIMEOUT)
+                              headers=AUTH_HEADERS, timeout=TIMEOUT)
         assert alloc.status_code == 200, alloc.text
 
     def test_unlock_idempotent(self, segment_factory):
@@ -330,8 +329,8 @@ class TestSegmentLocking:
                             keep_locked=True)
         sid = r.json()["id"]
 
-        first = requests.post(f"{API}/segments/{sid}/unlock", auth=AUTH, timeout=TIMEOUT)
-        second = requests.post(f"{API}/segments/{sid}/unlock", auth=AUTH, timeout=TIMEOUT)
+        first = requests.post(f"{API}/segments/{sid}/unlock", headers=AUTH_HEADERS, timeout=TIMEOUT)
+        second = requests.post(f"{API}/segments/{sid}/unlock", headers=AUTH_HEADERS, timeout=TIMEOUT)
         assert first.status_code == 200
         assert second.status_code == 200
 
@@ -352,15 +351,14 @@ class TestSegmentLocking:
         sid = r.json()["id"]
 
         old_lock_route = requests.put(f"{API}/segments/{sid}/lock", json={"locked": True},
-                                      auth=AUTH, timeout=TIMEOUT)
+                                      headers=AUTH_HEADERS, timeout=TIMEOUT)
         assert old_lock_route.status_code == 404
 
         # The general segment-update endpoint must not be able to re-lock either.
         seg = requests.get(f"{API}/segments/{sid}", timeout=TIMEOUT).json()
-        update = requests.put(f"{API}/segments/{sid}", auth=AUTH, timeout=TIMEOUT, json={
+        update = requests.put(f"{API}/segments/{sid}", headers=AUTH_HEADERS, timeout=TIMEOUT, json={
             "type": seg.get("type", "MCE"), "site": seg["site"], "vlan_id": seg["vlan_id"],
             "epg_name": seg["epg_name"], "segment": seg["segment"], "dhcp": seg["dhcp"],
-            "description": seg.get("description", ""),
             "locked": True,
         })
         assert update.status_code in (400, 422)

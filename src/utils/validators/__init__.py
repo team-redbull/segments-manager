@@ -4,7 +4,7 @@ This module provides a unified Validators class that aggregates all validation m
 from specialized validator modules. This maintains backward compatibility with existing code.
 
 Module structure:
-- input_validators.py: Site, VLAN ID, EPG name, cluster name, description
+- input_validators.py: Site, VLAN ID, EPG name, cluster name
 - network_validators.py: IP format, subnet masks, reserved IPs, overlap detection
 - organization_validators.py: Allocation state, uniqueness
 """
@@ -23,7 +23,6 @@ class Validators:
     validate_epg_name = staticmethod(InputValidators.validate_epg_name)
     validate_vlan_id = staticmethod(InputValidators.validate_vlan_id)
     validate_cluster_name = staticmethod(InputValidators.validate_cluster_name)
-    validate_description = staticmethod(InputValidators.validate_description)
 
     # Network validation methods
     validate_segment_format = staticmethod(NetworkValidators.validate_segment_format)

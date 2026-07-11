@@ -119,8 +119,8 @@ async def create_segment(document: Dict[str, Any]) -> Dict[str, Any]:
     """Insert a new segment document and return the created segment."""
     col = get_segments_collection()
     doc = {k: v for k, v in document.items() if k != "_id"}
-    doc.setdefault("dhcp", False)
-    doc.setdefault("description", "")
+    doc.setdefault("type", "HC")
+    doc.setdefault("dhcp", True)
     doc.setdefault("cluster_name", None)
     doc.setdefault("allocated_at", None)
     doc.setdefault("released", False)

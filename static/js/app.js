@@ -17,8 +17,7 @@ function quickSearchMatches(segment, needle) {
         hay(segment.vlan_id).includes(needle) ||
         hay(segment.epg_name).includes(needle) ||
         hay(segment.segment).includes(needle) ||
-        hay(segment.cluster_name).includes(needle) ||
-        hay(segment.description).includes(needle)
+        hay(segment.cluster_name).includes(needle)
     );
 }
 

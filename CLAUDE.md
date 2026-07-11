@@ -43,7 +43,10 @@ MONGODB_URL="mongodb://localhost:27017"          # or mongodb+srv://... for Atla
 MONGODB_DB_NAME="segments_manager"                    # optional, default: segments_manager
 SITES="site1,site2,site3"                          # comma-separated site names
 SITE_PREFIXES="site1:192,site2:193,site3:194"      # site:first-octet — every site in SITES MUST have an entry
+API_TOKEN="<long-random-secret>"                   # REQUIRED (fail-fast) — Bearer token for write requests
 ```
+
+> **API authentication.** `GET`/`HEAD` requests are open (the read-only web UI needs no auth). Every mutating request (`POST`/`PUT`/`PATCH`/`DELETE`) under `/api/*` must present the API token as `Authorization: Bearer <API_TOKEN>`. The token is the **only** credential — there is no username/password login, session, or cookie (all removed). Enforcement is centralized in one middleware in `src/app.py` (fail-closed — new write routes are protected automatically); there are no per-route auth dependencies. The token check (`verify_api_token`) uses a constant-time comparison.
 
 ### Testing
 
@@ -102,7 +105,7 @@ Chart in `deploy/helm/`. Set `mongodb.url` (stored in a generated Secret) or poi
 3. **Async throughout** — all I/O is `async`/`await` on Motor.
 4. **Atomic allocation** — `allocate_segment()` uses `find_one_and_update(..., return_document=AFTER)` so concurrent callers can never receive the same segment.
 5. **Short in-memory cache** — the full segments list is cached (60s TTL) with in-flight request de-duplication (`src/database/cache.py`); invalidated on every write.
-6. **Fail-fast config** — missing `MONGODB_URL`, or a site in `SITES` without a `SITE_PREFIXES` entry, crashes at startup.
+6. **Fail-fast config** — missing `MONGODB_URL`, missing `API_TOKEN`, or a site in `SITES` without a `SITE_PREFIXES` entry, crashes at startup.
 
 ---
 
@@ -168,8 +171,7 @@ Collection: **`segments`**
     "vlan_id":      int,             # 1–4094
     "epg_name":     str,
     "segment":      str,             # CIDR, e.g. "192.168.1.0/24"
-    "dhcp":         bool,
-    "description":  str,
+    "dhcp":         bool,            # defaults to True on creation
     "cluster_name": str | None,      # None = available; comma-separated for shared segments
     "allocated_at": datetime | None,
     "released":     bool,
@@ -192,11 +194,11 @@ Collection: **`segments`**
 
 ---
 
-## Request Flow — Allocating a VLAN
+## Request Flow — Allocating a Segment
 
 ```
-POST /api/allocate-vlan  {cluster_name, site}
-    ↓ routes.py → AllocationService.allocate_vlan()
+POST /api/allocate-segment  {cluster_name, site}
+    ↓ routes.py → AllocationService.allocate_segment()
     ├─ validators: site, cluster_name
     ├─ DatabaseUtils.find_existing_allocation()  → idempotent: returns existing allocation if any
     └─ DatabaseUtils.find_and_allocate_segment() → allocate_segment() atomic find_one_and_update
@@ -210,7 +212,7 @@ Return VLANAllocationResponse
 
 Defense-in-depth in `src/utils/validators/`:
 
-- **input_validators.py** — site (must be in `SITES`), VLAN ID (1–4094), EPG name (≤64 chars, safe charset), cluster name, description.
+- **input_validators.py** — site (must be in `SITES`), VLAN ID (1–4094), EPG name (≤64 chars, safe charset), cluster name.
 - **network_validators.py** — CIDR format & strict network address, **site IP-prefix enforcement** (`get_site_prefix(site)`), subnet mask /16–/31, reserved-range rejection, overlap detection.
 - **organization_validators.py** — allocation state (can't delete allocated), **EPG-name uniqueness per site**.
 
@@ -235,7 +237,7 @@ VLAN uniqueness is enforced both at the app level (`check_vlan_exists(site, vlan
 1. **Production application** — emphasize reliability, validation, error handling.
 2. **MongoDB is the source of truth** — all data ops go through the Motor layer in `src/database/`.
 3. **No VRF, no external/centralized IPAM** — the app is decentralized and per-site. Do not reintroduce either concept.
-4. **Fail-fast config** — `MONGODB_URL` and complete `SITE_PREFIXES` are required at startup.
+4. **Fail-fast config** — `MONGODB_URL`, `API_TOKEN`, and complete `SITE_PREFIXES` are required at startup.
 5. **Async throughout** — everything touching the DB is `async`.
 6. **Invalidate cache on writes** — call `invalidate_cache(CACHE_KEY_SEGMENTS)` after modifications (the Mongo write functions already do this).
 7. **Wrap service methods** with `@handle_db_errors` + `@retry_on_network_error` + `@log_operation_timing` (or the combined `@db_operation`).
