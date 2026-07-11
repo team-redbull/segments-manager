@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException
 
 from ..models.schemas import (
     SegmentAllocationRequest, SegmentAllocationResponse,
-    SegmentRelease, Segment
+    SegmentRelease, SegmentUnlock, Segment
 )
 from ..services.allocation_service import AllocationService
 from ..services.segment_service import SegmentService
@@ -33,21 +33,20 @@ async def release_segment(
 @router.get("/segments")
 async def get_segments(
     site: Optional[str] = None,
-    allocated: Optional[bool] = None,
-    locked: Optional[bool] = None,
+    status: Optional[str] = None,
     type: Optional[str] = None,
 ):
-    """Get segments with optional filters"""
-    return await SegmentService.get_segments(site, allocated, locked, type)
+    """Get segments with optional filters (status: Locked | Available | Allocated)"""
+    return await SegmentService.get_segments(site, status, type)
 
 @router.get("/segments/search")
 async def search_segments(
-    q: str, 
-    site: Optional[str] = None, 
-    allocated: Optional[bool] = None
+    q: str,
+    site: Optional[str] = None,
+    status: Optional[str] = None
 ):
     """Search segments by cluster name, EPG name, VLAN ID, or segment"""
-    return await SegmentService.search_segments(q, site, allocated)
+    return await SegmentService.search_segments(q, site, status)
 
 @router.post("/segments")
 async def create_segment(
@@ -78,17 +77,30 @@ async def update_segment_clusters(
     cluster_names = request.get("cluster_names", "")
     return await SegmentService.update_segment_clusters(segment_id, cluster_names)
 
+@router.post("/segments/unlock")
+async def unlock_segment_by_segment(
+    request: SegmentUnlock
+):
+    """Unlock a segment identified by its CIDR value (status Locked -> Available).
+
+    Keyed by the segment's natural identifier — the CIDR (unique) — so callers
+    that know the network value need not resolve the internal document id
+    first. Intended to be called by the service responsible for opening
+    firewall rules once it has done so. One-way transition; idempotent.
+    """
+    return await SegmentService.unlock_segment_by_segment(request.segment)
+
 @router.post("/segments/{segment_id}/unlock")
 async def unlock_segment(
     segment_id: str
 ):
-    """Unlock a segment (locked -> available).
+    """Unlock a segment (status Locked -> Available).
 
-    New segments start locked (firewall rules not yet open) and are excluded
-    from automatic VLAN allocation until unlocked. Intended to be called by
-    the service responsible for opening firewall rules once it has done so.
-    This is a one-way lifecycle transition — there is no endpoint to re-lock
-    a segment.
+    New segments start with status "Locked" (firewall rules not yet open) and
+    are excluded from automatic VLAN allocation until unlocked. Intended to be
+    called by the service responsible for opening firewall rules once it has
+    done so. This is a one-way lifecycle transition — there is no endpoint to
+    re-lock a segment.
     """
     return await SegmentService.unlock_segment(segment_id)
 
@@ -132,19 +144,19 @@ async def health_check():
 # Export Routes
 @router.get("/export/segments/csv")
 async def export_segments_csv(
-    site: Optional[str] = None, 
-    allocated: Optional[bool] = None
+    site: Optional[str] = None,
+    status: Optional[str] = None
 ):
     """Export segments data as CSV"""
-    return await ExportService.export_segments_csv(site=site, allocated=allocated)
+    return await ExportService.export_segments_csv(site=site, status=status)
 
 @router.get("/export/segments/excel")
 async def export_segments_excel(
-    site: Optional[str] = None, 
-    allocated: Optional[bool] = None
+    site: Optional[str] = None,
+    status: Optional[str] = None
 ):
     """Export segments data as Excel"""
-    return await ExportService.export_segments_excel(site=site, allocated=allocated)
+    return await ExportService.export_segments_excel(site=site, status=status)
 
 @router.get("/export/stats/csv")
 async def export_stats_csv():

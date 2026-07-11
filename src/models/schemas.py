@@ -75,6 +75,21 @@ class SegmentAllocationResponse(BaseModel):
     }
 
 
+class SegmentUnlock(BaseModel):
+    segment: str = Field(..., description="Network segment in CIDR notation (unique per segment)", examples=["192.168.1.0/24"])
+
+    model_config = {
+        "extra": "forbid",
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "segment": "192.168.1.0/24"
+                }
+            ]
+        }
+    }
+
+
 class SegmentRelease(BaseModel):
     cluster_name: str = Field(..., description="Name of the cluster to release", examples=["cluster-prod-01"])
     site: str = Field(..., description="Site where cluster is allocated", examples=["site1"])

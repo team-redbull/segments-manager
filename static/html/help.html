@@ -87,12 +87,11 @@
             <p>Every segment has a <code>type</code>, one of <code>MCE</code>, <code>INVENTORY</code>, <code>HC</code>, <code>PXE</code>. Optional — defaults to <code>HC</code> if omitted when creating or updating a segment.</p>
 
             <h3>Segment states</h3>
-            <p>Segment lifecycle: <code>Locked → Available → Allocated → Available</code>. Locking is one-way — once unlocked, a segment can never become locked again via the API.</p>
+            <p>Every segment carries a <code>status</code> field. Lifecycle: <code>Locked → Available → Allocated → Available</code>. Locking is one-way — once unlocked, a segment can never become locked again via the API.</p>
             <ul>
-                <li><strong>Locked</strong> — the default state for a newly-created segment. Firewall rules for the segment have not been opened yet, so it's excluded from automatic allocation. An external service unlocks it via <code>POST /api/segments/{id}/unlock</code> once provisioning is complete.</li>
-                <li><strong>Available</strong> — unlocked and not allocated to any cluster.</li>
+                <li><strong>Locked</strong> — the default status for a newly-created segment. Firewall rules for the segment have not been opened yet, so it's excluded from automatic allocation. An external service unlocks it via <code>POST /api/segments/unlock</code> (by CIDR) or <code>POST /api/segments/{id}/unlock</code> once provisioning is complete.</li>
+                <li><strong>Available</strong> — unlocked and not allocated to any cluster (including previously-released segments; the <code>released</code> flag records that history).</li>
                 <li><strong>Allocated</strong> — assigned to one or more clusters.</li>
-                <li><strong>Released</strong> — previously allocated, now available again (not re-locked).</li>
             </ul>
 
             <h3>Allocation logic</h3>
@@ -100,8 +99,8 @@
             <ol>
                 <li>Check if the cluster already has a segment at the site.</li>
                 <li>Check if the cluster is part of a shared segment.</li>
-                <li>If not found, allocate the first available <strong>unlocked</strong> segment.</li>
-                <li>If no unlocked segments are available, return an error.</li>
+                <li>If not found, atomically allocate the first segment with status <strong>Available</strong>.</li>
+                <li>If no <code>Available</code> segments exist at the site, return an error.</li>
             </ol>
         </section>
 
@@ -181,8 +180,7 @@
             </div>
             <div class="code-block">Query parameters:
 - site (optional): Filter by site
-- allocated (optional): Filter by allocation status (true/false)
-- locked (optional): Filter by lock status (true/false)
+- status (optional): Filter by lifecycle status (Locked/Available/Allocated)
 - type (optional): Filter by segment type (MCE/INVENTORY/HC/PXE)</div>
 
             <div class="endpoint">
@@ -200,13 +198,22 @@
 }</div>
             <div class="callout">
                 <svg viewBox="0 0 24 24" class="icon icon-sm"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-                <span><strong>Note:</strong> New segments always start <code>locked: true</code> and are excluded from allocation until unlocked — see <code>POST /api/segments/{id}/unlock</code> below. Locking is one-way; there is no endpoint to re-lock a segment. <code>type</code> is optional and defaults to <code>HC</code> if omitted.</span>
+                <span><strong>Note:</strong> New segments always start with <code>status: "Locked"</code> and are excluded from allocation until unlocked — see the unlock endpoints below. Locking is one-way; there is no endpoint to re-lock a segment. <code>type</code> is optional and defaults to <code>HC</code> if omitted.</span>
             </div>
 
             <div class="endpoint">
                 <span class="method post">POST</span>
+                <span class="endpoint__path">/api/segments/unlock</span>
+                <span class="endpoint__desc">— Unlock a segment by CIDR (status Locked → Available)</span>
+            </div>
+            <div class="code-block">{
+  "segment": "192.168.1.0/24"
+}</div>
+
+            <div class="endpoint">
+                <span class="method post">POST</span>
                 <span class="endpoint__path">/api/segments/{id}/unlock</span>
-                <span class="endpoint__desc">— Unlock a segment (no request body)</span>
+                <span class="endpoint__desc">— Unlock a segment by id (no request body)</span>
             </div>
 
             <div class="endpoint">
@@ -325,8 +332,10 @@ curl -H "Authorization: Bearer $API_TOKEN" -X POST "http://localhost:8000/api/se
   }'
 # -> {"message": "Segment created", "id": "..."}
 
-# 2. Unlock it once firewall rules are open (locked segments can't be allocated)
-curl -H "Authorization: Bearer $API_TOKEN" -X POST "http://localhost:8000/api/segments/{id}/unlock"
+# 2. Unlock it once firewall rules are open (Locked segments can't be allocated)
+curl -H "Authorization: Bearer $API_TOKEN" -X POST "http://localhost:8000/api/segments/unlock" \
+  -H "Content-Type: application/json" \
+  -d '{"segment": "192.168.15.0/24"}'
 
 # 3. Allocate it to a cluster
 curl -H "Authorization: Bearer $API_TOKEN" -X POST "http://localhost:8000/api/allocate-segment" \

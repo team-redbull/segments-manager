@@ -13,7 +13,7 @@ class OrganizationValidators:
     @staticmethod
     def validate_segment_not_allocated(segment: Dict[str, Any]) -> None:
         """Validate that a segment is not currently allocated."""
-        if segment.get("cluster_name") and not segment.get("released", False):
+        if segment.get("status") == "Allocated":
             raise HTTPException(
                 status_code=400,
                 detail="Cannot delete allocated segment"

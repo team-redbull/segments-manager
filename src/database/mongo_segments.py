@@ -21,6 +21,12 @@ from .cache import (
 
 logger = logging.getLogger(__name__)
 
+# Segment lifecycle statuses: Locked -> Available -> Allocated -> Available.
+# Locking is one-way — there is no API surface that re-locks a segment.
+STATUS_LOCKED = "Locked"
+STATUS_AVAILABLE = "Available"
+STATUS_ALLOCATED = "Allocated"
+
 
 # ---------------------------------------------------------------------------
 # Private helpers
@@ -30,10 +36,8 @@ def _segment_matches(
     segment: Dict[str, Any],
     site: Optional[str],
     vlan_id: Optional[int],
-    allocated: Optional[bool],
     cluster_name: Optional[str],
-    released: Optional[bool],
-    locked: Optional[bool] = None,
+    status: Optional[str] = None,
     type: Optional[str] = None,
 ) -> bool:
     """Return True if segment satisfies all non-None filter criteria."""
@@ -41,15 +45,9 @@ def _segment_matches(
         return False
     if vlan_id is not None and segment.get("vlan_id") != vlan_id:
         return False
-    if allocated is not None:
-        is_allocated = bool(segment.get("cluster_name")) and not segment.get("released", False)
-        if allocated != is_allocated:
-            return False
     if cluster_name is not None and segment.get("cluster_name") != cluster_name:
         return False
-    if released is not None and segment.get("released", False) != released:
-        return False
-    if locked is not None and bool(segment.get("locked", False)) != locked:
+    if status is not None and str(segment.get("status", "")).lower() != status.lower():
         return False
     if type is not None and str(segment.get("type", "")).lower() != type.lower():
         return False
@@ -93,17 +91,15 @@ async def _fetch_all_segments() -> List[Dict[str, Any]]:
 async def get_segments(
     site: Optional[str] = None,
     vlan_id: Optional[int] = None,
-    allocated: Optional[bool] = None,
     cluster_name: Optional[str] = None,
-    released: Optional[bool] = None,
-    locked: Optional[bool] = None,
+    status: Optional[str] = None,
     type: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """Return segments matching all provided filter criteria."""
     all_segments = await _fetch_all_segments()
     return [
         s for s in all_segments
-        if _segment_matches(s, site, vlan_id, allocated, cluster_name, released, locked, type)
+        if _segment_matches(s, site, vlan_id, cluster_name, status, type)
     ]
 
 
@@ -112,6 +108,13 @@ async def get_segment_by_id(segment_id: str) -> Optional[Dict[str, Any]]:
     oid = _to_object_id(segment_id)
     col = get_segments_collection()
     doc = await col.find_one({"_id": oid})
+    return _doc_to_segment(doc) if doc else None
+
+
+async def get_segment_by_segment(segment: str) -> Optional[Dict[str, Any]]:
+    """Return a single segment by its CIDR value (unique index), or None if not found."""
+    col = get_segments_collection()
+    doc = await col.find_one({"segment": segment})
     return _doc_to_segment(doc) if doc else None
 
 
@@ -125,9 +128,11 @@ async def create_segment(document: Dict[str, Any]) -> Dict[str, Any]:
     doc.setdefault("allocated_at", None)
     doc.setdefault("released", False)
     doc.setdefault("released_at", None)
-    # New segments start locked (firewall rules not yet open) until an external
-    # service unlocks them via PUT /segments/{id}/lock — see AllocationService.
-    doc.setdefault("locked", True)
+    # New segments start in the "Locked" lifecycle status (firewall rules not
+    # yet open) until an external service unlocks them via
+    # POST /segments/unlock (or /segments/{id}/unlock). Lifecycle:
+    # Locked -> Available -> Allocated -> Available.
+    doc.setdefault("status", STATUS_LOCKED)
 
     result = await col.insert_one(doc)
     invalidate_cache(CACHE_KEY_SEGMENTS)
@@ -175,12 +180,12 @@ async def allocate_segment(
 
     query = {
         "site": {"$regex": f"^{site}$", "$options": "i"},
-        "cluster_name": None,
-        "locked": {"$ne": True},
+        "status": STATUS_AVAILABLE,
     }
     sort = [("vlan_id", 1)] if sort_by_vlan_id else None
     update = {
         "$set": {
+            "status": STATUS_ALLOCATED,
             "cluster_name": cluster_name,
             "allocated_at": datetime.now(timezone.utc),
             "released": False,

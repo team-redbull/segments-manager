@@ -9,6 +9,7 @@ from typing import Optional, Dict, Any
 from ...database import (
     create_segment as _create_segment,
     get_segment_by_id as _get_segment_by_id,
+    get_segment_by_segment as _get_segment_by_segment,
     update_segment as _update_segment,
     delete_segment as _delete_segment,
 )
@@ -48,6 +49,11 @@ class SegmentCRUD:
     async def get_segment_by_id(segment_id: str) -> Optional[Dict[str, Any]]:
         """Get segment by ID"""
         return await _get_segment_by_id(segment_id)
+
+    @staticmethod
+    async def get_segment_by_segment(segment: str) -> Optional[Dict[str, Any]]:
+        """Get segment by its CIDR value (unique)"""
+        return await _get_segment_by_segment(segment)
 
     @staticmethod
     async def update_segment_by_id(segment_id: str, update_data: Dict[str, Any]) -> bool:

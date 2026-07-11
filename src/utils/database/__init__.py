@@ -29,6 +29,7 @@ class DatabaseUtils:
     # CRUD operations
     create_segment = staticmethod(SegmentCRUD.create_segment)
     get_segment_by_id = staticmethod(SegmentCRUD.get_segment_by_id)
+    get_segment_by_segment = staticmethod(SegmentCRUD.get_segment_by_segment)
     update_segment_by_id = staticmethod(SegmentCRUD.update_segment_by_id)
     delete_segment_by_id = staticmethod(SegmentCRUD.delete_segment_by_id)
 

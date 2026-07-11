@@ -142,11 +142,7 @@ let draftCombinator = "AND";
 function evaluateClauseAgainstSegment(segment, clause) {
     let raw;
     if (clause.field === "status") {
-        raw = segment.locked
-            ? "locked"
-            : segment.cluster_name && !segment.released
-            ? "allocated"
-            : "available";
+        raw = String(segment.status || "").toLowerCase();
     } else if (clause.field === "dhcp") {
         raw = segment.dhcp ? "true" : "false";
     } else {
@@ -527,8 +523,8 @@ window.exportData = async function exportData(format) {
         }
 
         const params = new URLSearchParams();
-        if (currentFilter === "available") params.append("allocated", "false");
-        else if (currentFilter === "allocated") params.append("allocated", "true");
+        if (currentFilter === "available") params.append("status", "Available");
+        else if (currentFilter === "allocated") params.append("status", "Allocated");
         if (currentSite) params.append("site", currentSite);
 
         const queryString = params.toString();
@@ -697,9 +693,7 @@ let sortColumn = null;
 let sortDirection = "asc";
 
 function segmentStatusLabel(segment) {
-    if (segment.locked) return "Locked";
-    if (segment.cluster_name && !segment.released) return "Allocated";
-    return "Available";
+    return segment.status || "Available";
 }
 
 function compareSegments(a, b, column, direction) {
@@ -756,8 +750,8 @@ async function loadSegments(showSkeleton = false) {
 
     try {
         const params = new URLSearchParams();
-        if (currentFilter === "available") params.append("allocated", "false");
-        else if (currentFilter === "allocated") params.append("allocated", "true");
+        if (currentFilter === "available") params.append("status", "Available");
+        else if (currentFilter === "allocated") params.append("status", "Allocated");
         if (currentSite) params.append("site", currentSite);
 
         const queryString = params.toString();
@@ -793,10 +787,8 @@ async function loadSegments(showSkeleton = false) {
 
         container.innerHTML = segments
             .map((segment) => {
-                const isLocked = !!segment.locked;
-                const isAllocated = segment.cluster_name && !segment.released;
-                const statusClass = isLocked ? "locked" : isAllocated ? "allocated" : "available";
-                const statusLabel = isLocked ? "Locked" : isAllocated ? "Allocated" : "Available";
+                const statusLabel = segmentStatusLabel(segment);
+                const statusClass = statusLabel.toLowerCase();
                 const dhcp = segment.dhcp;
                 return `
                 <tr>

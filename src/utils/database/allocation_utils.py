@@ -10,6 +10,8 @@ import time
 from typing import Optional, Dict, Any
 
 from ...database import (
+    STATUS_AVAILABLE,
+    STATUS_ALLOCATED,
     get_segments,
     update_segment as _update_segment,
     allocate_segment as _allocate_segment,
@@ -28,12 +30,12 @@ class AllocationUtils:
         Supports both single clusters and shared segments (comma-separated).
         """
         # Exact match first
-        candidates = await get_segments(site=site, cluster_name=cluster_name, released=False)
+        candidates = await get_segments(site=site, cluster_name=cluster_name, status=STATUS_ALLOCATED)
         if candidates:
             return candidates[0]
 
         # Shared-segment regex search (cluster may be part of "cluster1,cluster2")
-        all_site_segs = await get_segments(site=site, released=False)
+        all_site_segs = await get_segments(site=site, status=STATUS_ALLOCATED)
         pattern = re.compile(rf"(^|,){re.escape(cluster_name)}(,|$)")
         return next(
             (s for s in all_site_segs if s.get("cluster_name") and pattern.search(s["cluster_name"])),
@@ -52,7 +54,7 @@ class AllocationUtils:
     @staticmethod
     async def find_available_segment(site: str) -> Optional[Dict[str, Any]]:
         """Find an available segment for a site (kept for backward compatibility)."""
-        segments = await get_segments(site=site, allocated=False)
+        segments = await get_segments(site=site, status=STATUS_AVAILABLE)
         return segments[0] if segments else None
 
     @staticmethod
@@ -60,6 +62,7 @@ class AllocationUtils:
         """Allocate a segment to a cluster (kept for backward compatibility)."""
         allocation_time = get_current_utc()
         return await _update_segment(segment_id, {
+            "status": STATUS_ALLOCATED,
             "cluster_name": cluster_name,
             "allocated_at": allocation_time,
             "released": False,
@@ -71,7 +74,7 @@ class AllocationUtils:
         """Release a segment allocation.
         For shared segments, removes only the specified cluster from the list.
         """
-        all_segments = await get_segments(site=site, released=False)
+        all_segments = await get_segments(site=site, status=STATUS_ALLOCATED)
 
         pattern = re.compile(rf"(^|,){re.escape(cluster_name)}(,|$)")
         segment = next(
@@ -84,8 +87,9 @@ class AllocationUtils:
         current_clusters = segment["cluster_name"]
 
         if current_clusters == cluster_name:
-            # Single cluster — release fully
+            # Single cluster — release fully (back to Available, never re-locked)
             return await _update_segment(segment["_id"], {
+                "status": STATUS_AVAILABLE,
                 "cluster_name": None,
                 "released": True,
                 "released_at": get_current_utc()
@@ -97,6 +101,7 @@ class AllocationUtils:
             cluster_list.remove(cluster_name)
             if len(cluster_list) == 0:
                 return await _update_segment(segment["_id"], {
+                    "status": STATUS_AVAILABLE,
                     "cluster_name": None,
                     "released": True,
                     "released_at": get_current_utc()

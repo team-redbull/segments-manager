@@ -2,6 +2,7 @@ import logging
 from typing import Optional, List, Dict, Any
 from fastapi import HTTPException
 
+from ..database import STATUS_LOCKED, STATUS_AVAILABLE
 from ..models.schemas import Segment
 from ..utils.database_utils import DatabaseUtils
 from ..utils.validators import Validators
@@ -57,12 +58,11 @@ class SegmentService:
     @log_operation_timing("get_segments", threshold_ms=1000)
     async def get_segments(
         site: Optional[str] = None,
-        allocated: Optional[bool] = None,
-        locked: Optional[bool] = None,
+        status: Optional[str] = None,
         type: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """Get segments with optional filters"""
-        segments = await DatabaseUtils.get_segments_with_filters(site, allocated, locked, type)
+        segments = await DatabaseUtils.get_segments_with_filters(site, status, type)
         logger.debug(f"Retrieved {len(segments)} segments")
         return segments
 
@@ -73,10 +73,10 @@ class SegmentService:
     async def search_segments(
         search_query: str,
         site: Optional[str] = None,
-        allocated: Optional[bool] = None
+        status: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """Search segments by cluster name, EPG name, VLAN ID, or segment"""
-        segments = await DatabaseUtils.search_segments(search_query, site, allocated)
+        segments = await DatabaseUtils.search_segments(search_query, site, status)
         logger.debug(f"Found {len(segments)} matching segments for query '{search_query}'")
         return segments
 
@@ -217,13 +217,13 @@ class SegmentService:
     @retry_on_network_error(max_retries=3)
     @log_operation_timing("unlock_segment", threshold_ms=2000)
     async def unlock_segment(segment_id: str) -> Dict[str, str]:
-        """Unlock a segment (locked -> available).
+        """Unlock a segment (status "Locked" -> "Available").
 
-        Locked is the initial state of every new segment (firewall rules not
-        yet open), and segments are excluded from automatic VLAN allocation
-        while locked. This is a one-way lifecycle transition — segments
-        cannot be re-locked via the API. Idempotent: unlocking an
-        already-unlocked segment is a no-op.
+        "Locked" is the initial status of every new segment (firewall rules
+        not yet open), and segments are excluded from automatic VLAN
+        allocation until unlocked. This is a one-way lifecycle transition —
+        segments cannot be re-locked via the API. Idempotent: unlocking a
+        segment that is already "Available" (or "Allocated") is a no-op.
         """
         Validators.validate_object_id(segment_id)
 
@@ -231,14 +231,43 @@ class SegmentService:
         if not existing_segment:
             raise HTTPException(status_code=404, detail="Segment not found")
 
-        if not bool(existing_segment.get("locked", False)):
+        if existing_segment.get("status") != STATUS_LOCKED:
             return {"message": "Segment already unlocked"}
 
-        success = await DatabaseUtils.update_segment_by_id(segment_id, {"locked": False})
+        success = await DatabaseUtils.update_segment_by_id(segment_id, {"status": STATUS_AVAILABLE})
         if not success:
             raise HTTPException(status_code=500, detail="Failed to unlock segment")
 
-        logger.info(f"Segment {segment_id} unlocked")
+        logger.info(f"Segment {segment_id} unlocked (status: {STATUS_LOCKED} -> {STATUS_AVAILABLE})")
+        return {"message": "Segment unlocked successfully"}
+
+    @staticmethod
+    @handle_db_errors
+    @retry_on_network_error(max_retries=3)
+    @log_operation_timing("unlock_segment_by_segment", threshold_ms=2000)
+    async def unlock_segment_by_segment(segment: str) -> Dict[str, str]:
+        """Unlock a segment identified by its CIDR value (status "Locked" -> "Available").
+
+        Same semantics as unlock_segment, but the segment is identified by its
+        natural key — the `segment` CIDR (unique index) — instead of the Mongo
+        ObjectId. Intended for callers (e.g. the connectivity orchestrator)
+        that know the network value but not the internal document id.
+        Idempotent: unlocking a segment that is already "Available" (or
+        "Allocated") is a no-op.
+        """
+        existing_segment = await DatabaseUtils.get_segment_by_segment(segment)
+        if not existing_segment:
+            raise HTTPException(status_code=404, detail="Segment not found")
+
+        if existing_segment.get("status") != STATUS_LOCKED:
+            return {"message": "Segment already unlocked"}
+
+        segment_id = str(existing_segment["_id"])
+        success = await DatabaseUtils.update_segment_by_id(segment_id, {"status": STATUS_AVAILABLE})
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to unlock segment")
+
+        logger.info(f"Segment {segment} unlocked (status: {STATUS_LOCKED} -> {STATUS_AVAILABLE})")
         return {"message": "Segment unlocked successfully"}
 
     @staticmethod

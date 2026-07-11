@@ -271,7 +271,8 @@ class TestAllocation:
 
 
 # ---------------------------------------------------------------------------
-# Locking (segments start locked; excluded from auto-allocation until unlocked)
+# Lifecycle status (segments start "Locked"; excluded from auto-allocation
+# until unlocked to "Available"; allocation sets "Allocated")
 # ---------------------------------------------------------------------------
 class TestSegmentLocking:
     def test_new_segment_defaults_locked(self, segment_factory):
@@ -283,7 +284,8 @@ class TestSegmentLocking:
 
         got = requests.get(f"{API}/segments/{sid}", timeout=TIMEOUT)
         assert got.status_code == 200
-        assert got.json()["locked"] is True
+        assert got.json()["status"] == "Locked"
+        assert "locked" not in got.json()  # legacy boolean is gone
 
     def test_locked_segment_excluded_from_allocation(self, segment_factory, release_cluster):
         # Create one locked segment and confirm the atomic allocator never
@@ -314,7 +316,7 @@ class TestSegmentLocking:
         assert unlock.status_code == 200, unlock.text
 
         got = requests.get(f"{API}/segments/{sid}", timeout=TIMEOUT)
-        assert got.json()["locked"] is False
+        assert got.json()["status"] == "Available"
 
         cluster = f"it-unlocktest-{uuid.uuid4().hex[:6]}"
         release_cluster(cluster, "site1")
@@ -344,39 +346,88 @@ class TestSegmentLocking:
         assert unauth.status_code == 401
 
     def test_no_relock_endpoint_exists(self, segment_factory):
-        # Segment lifecycle is one-way: locked -> available -> allocated -> available.
-        # There must be no API surface that can set locked back to True.
+        # Segment lifecycle is one-way: Locked -> Available -> Allocated -> Available.
+        # There must be no API surface that can set status back to "Locked".
         v = next_vlan()
         r = segment_factory(site="site1", vlan_id=v, epg_name=_uid(), segment=cidr_for("site1", v))
         sid = r.json()["id"]
 
-        old_lock_route = requests.put(f"{API}/segments/{sid}/lock", json={"locked": True},
+        old_lock_route = requests.put(f"{API}/segments/{sid}/lock", json={"status": "Locked"},
                                       headers=AUTH_HEADERS, timeout=TIMEOUT)
         assert old_lock_route.status_code == 404
 
-        # The general segment-update endpoint must not be able to re-lock either.
+        # The general segment-update endpoint must not be able to re-lock either
+        # (status is server-managed; the Segment model forbids extra fields).
         seg = requests.get(f"{API}/segments/{sid}", timeout=TIMEOUT).json()
         update = requests.put(f"{API}/segments/{sid}", headers=AUTH_HEADERS, timeout=TIMEOUT, json={
             "type": seg.get("type", "MCE"), "site": seg["site"], "vlan_id": seg["vlan_id"],
             "epg_name": seg["epg_name"], "segment": seg["segment"], "dhcp": seg["dhcp"],
-            "locked": True,
+            "status": "Locked",
         })
         assert update.status_code in (400, 422)
 
-    def test_get_segments_filters_by_locked(self, segment_factory):
+    def test_get_segments_filters_by_status(self, segment_factory):
         v = next_vlan()
         r = segment_factory(site="site1", vlan_id=v, epg_name=_uid(), segment=cidr_for("site1", v),
                             keep_locked=True)
         sid = r.json()["id"]
 
-        locked_only = requests.get(f"{API}/segments", params={"site": "site1", "locked": "true"},
+        locked_only = requests.get(f"{API}/segments", params={"site": "site1", "status": "Locked"},
                                    timeout=TIMEOUT)
         assert locked_only.status_code == 200
         assert any(s["_id"] == sid for s in locked_only.json())
 
-        unlocked_only = requests.get(f"{API}/segments", params={"site": "site1", "locked": "false"},
-                                     timeout=TIMEOUT)
-        assert not any(s["_id"] == sid for s in unlocked_only.json())
+        available_only = requests.get(f"{API}/segments", params={"site": "site1", "status": "Available"},
+                                      timeout=TIMEOUT)
+        assert not any(s["_id"] == sid for s in available_only.json())
+
+
+# ---------------------------------------------------------------------------
+# Unlock by segment CIDR (natural key; used by the connectivity orchestrator)
+# ---------------------------------------------------------------------------
+class TestUnlockBySegment:
+    def test_unlock_by_segment_value(self, segment_factory):
+        v = next_vlan()
+        cidr = cidr_for("site1", v)
+        r = segment_factory(site="site1", vlan_id=v, epg_name=_uid(), segment=cidr,
+                            keep_locked=True)
+        assert r.status_code == 200, r.text
+        sid = r.json()["id"]
+
+        unlock = requests.post(f"{API}/segments/unlock", json={"segment": cidr},
+                               headers=AUTH_HEADERS, timeout=TIMEOUT)
+        assert unlock.status_code == 200, unlock.text
+
+        got = requests.get(f"{API}/segments/{sid}", timeout=TIMEOUT)
+        assert got.json()["status"] == "Available"
+
+    def test_unlock_by_segment_idempotent(self, segment_factory):
+        v = next_vlan()
+        cidr = cidr_for("site2", v)
+        segment_factory(site="site2", vlan_id=v, epg_name=_uid(), segment=cidr,
+                        keep_locked=True)
+
+        first = requests.post(f"{API}/segments/unlock", json={"segment": cidr},
+                              headers=AUTH_HEADERS, timeout=TIMEOUT)
+        second = requests.post(f"{API}/segments/unlock", json={"segment": cidr},
+                               headers=AUTH_HEADERS, timeout=TIMEOUT)
+        assert first.status_code == 200
+        assert second.status_code == 200
+        assert "already" in second.text.lower()
+
+    def test_unlock_by_segment_unknown_404(self):
+        r = requests.post(f"{API}/segments/unlock", json={"segment": "10.255.255.0/24"},
+                          headers=AUTH_HEADERS, timeout=TIMEOUT)
+        assert r.status_code == 404
+
+    def test_unlock_by_segment_requires_auth(self, segment_factory):
+        v = next_vlan()
+        cidr = cidr_for("site1", v)
+        segment_factory(site="site1", vlan_id=v, epg_name=_uid(), segment=cidr,
+                        keep_locked=True)
+
+        unauth = requests.post(f"{API}/segments/unlock", json={"segment": cidr}, timeout=TIMEOUT)
+        assert unauth.status_code == 401
 
 
 # ---------------------------------------------------------------------------
@@ -389,7 +440,7 @@ class TestStats:
         stats = r.json()
         assert isinstance(stats, list) and len(stats) > 0
         s = stats[0]
-        for key in ("site", "total_segments", "allocated", "available", "utilization"):
+        for key in ("site", "total_segments", "allocated", "available", "locked", "utilization"):
             assert key in s
 
 

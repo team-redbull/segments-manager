@@ -6,7 +6,7 @@ Handles calculation of site statistics and utilization metrics.
 import logging
 from typing import Dict, Any, List
 
-from ...database import get_segments
+from ...database import get_segments, STATUS_LOCKED, STATUS_AVAILABLE, STATUS_ALLOCATED
 from ...config.settings import SITES
 
 logger = logging.getLogger(__name__)
@@ -29,14 +29,16 @@ class StatisticsUtils:
         segments = await get_segments(site=site)
 
         total_segments = len(segments)
-        allocated = sum(1 for s in segments
-                       if s.get("cluster_name") and not s.get("released", False))
+        allocated = sum(1 for s in segments if s.get("status") == STATUS_ALLOCATED)
+        available = sum(1 for s in segments if s.get("status") == STATUS_AVAILABLE)
+        locked = sum(1 for s in segments if s.get("status") == STATUS_LOCKED)
 
         return {
             "site": site,
             "total_segments": total_segments,
             "allocated": allocated,
-            "available": total_segments - allocated,
+            "available": available,
+            "locked": locked,
             "utilization": round((allocated / total_segments * 100) if total_segments > 0 else 0, 1)
         }
 
@@ -58,14 +60,16 @@ class StatisticsUtils:
         for site in SITES:
             site_segments = [s for s in all_segments if s.get("site") == site]
             total_segments = len(site_segments)
-            allocated = sum(1 for s in site_segments
-                           if s.get("cluster_name") and not s.get("released", False))
+            allocated = sum(1 for s in site_segments if s.get("status") == STATUS_ALLOCATED)
+            available = sum(1 for s in site_segments if s.get("status") == STATUS_AVAILABLE)
+            locked = sum(1 for s in site_segments if s.get("status") == STATUS_LOCKED)
 
             stats.append({
                 "site": site,
                 "total_segments": total_segments,
                 "allocated": allocated,
-                "available": total_segments - allocated,
+                "available": available,
+                "locked": locked,
                 "utilization": round((allocated / total_segments * 100) if total_segments > 0 else 0, 1)
             })
 
