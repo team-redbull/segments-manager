@@ -3,48 +3,40 @@
 # Global configuration
 nameOverride: ""
 fullnameOverride: ""
-
 # Image configuration
 image:
   repository: ghcr.io/team-redbull/segments-manager
-  tag: refactor-segments-manager-871bf05
+  tag: refactor-segments-manager-969e09a
   pullPolicy: IfNotPresent
   pullSecrets: []
-
 # Pod configuration
 replicaCount: 1
 podAnnotations: {}
 podLabels: {}
-
 # Security context.
 # Left empty so the container runs as the image default (root, UID 0), which
 # can write /app/segments_manager.log. To run as a non-root user instead, populate
 # these blocks (e.g. runAsNonRoot: true / runAsUser: 1001) AND set LOG_FILE to a
 # writable path such as /app/data/segments_manager.log.
 podSecurityContext: {}
-
 securityContext: {}
-
 # Service configuration
 service:
   type: ClusterIP
   port: 8000
   targetPort: 8000
   annotations: {}
-
 # OpenShift Route configuration
 route:
   enabled: true
   annotations: {}
-  host: ""  # Leave empty for auto-generated
+  host: "" # Leave empty for auto-generated
   path: ""
   wildcardPolicy: None
   tls:
     enabled: true
     termination: edge
     insecureEdgeTerminationPolicy: Redirect
-
-
 # Application ConfigMap
 config:
   sitePrefixes: "site1:192,site2:193,site3:194"
@@ -58,26 +50,21 @@ config:
   # Base URL of the Cluster Orchestrator's unified workflows API - REQUIRED.
   # Every segment creation triggers the connectivity workflow there.
   workflowsApiUrl: "http://connectivity-api:8080"
-
 # MongoDB Configuration
 mongodb:
   # MongoDB connection URL - REQUIRED (stored in Secret)
   # Example: mongodb://user:pass@mongodb:27017 or mongodb+srv://... for Atlas
   url: "mongodb://localhost:27017"
-
   # Database name (optional, default: segments_manager)
   dbName: "segments_manager"
-
   # Skip TLS certificate verification (keeps the connection encrypted but does
   # NOT validate the server certificate/CA). Equivalent to "verify: false".
   # Useful for Atlas / self-hosted Mongo without a trusted CA chain.
   # Leave false in production if avoidable.
   tlsInsecure: false
-
   # Use existing secret for MongoDB URL (optional)
   existingSecret: ""
   existingSecretKey: "mongodb-url"
-
 # Authentication
 auth:
   # API token — the Bearer credential for every write (POST/PUT/PATCH/DELETE)
@@ -94,22 +81,19 @@ auth:
   # chart-managed path, inject it at deploy time via --set/-f from a secure
   # source (CI secret, Vault), never by editing it in git.
   apiToken: ""
-
   # Use an existing, out-of-band Secret for the API token (recommended). When
   # set, the chart does NOT create its own auth Secret — it references this one,
   # so the token value never passes through git or Helm values.
   existingSecret: "segments-manager-api-token"
   existingSecretKey: "api-token"
-
 # Persistent Volume Claim
 persistence:
   enabled: false
-  storageClass: ""  # Uses default StorageClass
+  storageClass: "" # Uses default StorageClass
   accessMode: ReadWriteOnce
   size: 1Gi
   annotations: {}
   mountPath: /app/data
-
 # Resource limits and requests
 resources:
   limits:
@@ -118,14 +102,12 @@ resources:
   requests:
     cpu: 250m
     memory: 256Mi
-
 # Horizontal Pod Autoscaler
 autoscaling:
   enabled: false
   minReplicas: 1
   maxReplicas: 3
   targetCPUUtilizationPercentage: 80
-
 # Health checks
 livenessProbe:
   httpGet:
@@ -135,7 +117,6 @@ livenessProbe:
   periodSeconds: 10
   timeoutSeconds: 5
   failureThreshold: 3
-
 readinessProbe:
   httpGet:
     path: /api/health
@@ -144,7 +125,6 @@ readinessProbe:
   periodSeconds: 5
   timeoutSeconds: 3
   failureThreshold: 3
-
 startupProbe:
   httpGet:
     path: /api/health
@@ -152,19 +132,16 @@ startupProbe:
   initialDelaySeconds: 10
   periodSeconds: 5
   failureThreshold: 12
-
 # Pod placement
 nodeSelector: {}
 tolerations: []
 affinity: {}
-
 # Service Account
 serviceAccount:
   create: true
   automount: true
   annotations: {}
   name: ""
-
 # Additional labels and annotations
 commonLabels: {}
 commonAnnotations: {}
