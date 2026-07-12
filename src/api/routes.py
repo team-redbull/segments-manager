@@ -4,7 +4,9 @@ from fastapi import APIRouter, HTTPException
 
 from ..models.schemas import (
     SegmentAllocationRequest, SegmentAllocationResponse,
-    SegmentRelease, SegmentUnlock, Segment
+    SegmentRelease, SegmentUnlock, Segment,
+    SegmentDhcpUpdate, SegmentClustersUpdate,
+    SegmentConnectivityRequestsUpdate
 )
 from ..services.allocation_service import AllocationService
 from ..services.segment_service import SegmentService
@@ -55,61 +57,69 @@ async def create_segment(
     """Create a new segment"""
     return await SegmentService.create_segment(segment)
 
-@router.get("/segments/{segment_id}")
-async def get_segment(segment_id: str):
-    """Get a single segment by ID"""
-    return await SegmentService.get_segment_by_id(segment_id)
+# Single-segment routes are keyed by the segment CIDR — the natural key
+# (unique + immutable) — never by the internal Mongo ObjectId. The CIDR
+# contains a "/" so it can't live in a path: reads/deletes take it as a
+# query parameter, mutations carry it in the request body.
 
-@router.put("/segments/{segment_id}")
-async def update_segment(
-    segment_id: str,
-    segment: Segment
+@router.get("/segments/by-segment")
+async def get_segment(segment: str):
+    """Get a single segment by its CIDR value (e.g. ?segment=192.168.1.0/24)"""
+    return await SegmentService.get_segment_by_segment(segment)
+
+@router.patch("/segments")
+async def update_segment_dhcp(
+    request: SegmentDhcpUpdate
 ):
-    """Update a segment"""
-    return await SegmentService.update_segment(segment_id, segment)
+    """Update a segment's DHCP flag — the only mutable segment field.
 
-@router.put("/segments/{segment_id}/clusters")
+    All other fields (site, vlan_id, epg_name, segment) are immutable after
+    creation; lifecycle fields are managed by their own endpoints.
+    """
+    return await SegmentService.update_segment_dhcp(request.segment, request.dhcp)
+
+@router.put("/segments/clusters")
 async def update_segment_clusters(
-    segment_id: str,
-    request: dict
+    request: SegmentClustersUpdate
 ):
-    """Update cluster assignment for a segment (for shared segments)"""
-    cluster_names = request.get("cluster_names", "")
-    return await SegmentService.update_segment_clusters(segment_id, cluster_names)
+    """Update cluster assignment for a segment (for shared segments).
+
+    Empty or omitted cluster_names releases the segment.
+    """
+    return await SegmentService.update_segment_clusters(request.segment, request.cluster_names or "")
+
+@router.put("/segments/connectivity-requests")
+async def set_segment_connectivity_requests(
+    request: SegmentConnectivityRequestsUpdate
+):
+    """Replace the pending connectivity request ids displayed for a segment.
+
+    Set by the connectivity orchestrator after it submits firewall (open-rules)
+    requests; the UI shows the ids beside the segment's status while they await
+    approval. An empty list clears the display (all requests completed).
+    Idempotent.
+    """
+    return await SegmentService.set_connectivity_requests(request.segment, request.request_ids)
+
 
 @router.post("/segments/unlock")
-async def unlock_segment_by_segment(
+async def unlock_segment(
     request: SegmentUnlock
 ):
     """Unlock a segment identified by its CIDR value (status Locked -> Available).
-
-    Keyed by the segment's natural identifier — the CIDR (unique) — so callers
-    that know the network value need not resolve the internal document id
-    first. Intended to be called by the service responsible for opening
-    firewall rules once it has done so. One-way transition; idempotent.
-    """
-    return await SegmentService.unlock_segment_by_segment(request.segment)
-
-@router.post("/segments/{segment_id}/unlock")
-async def unlock_segment(
-    segment_id: str
-):
-    """Unlock a segment (status Locked -> Available).
 
     New segments start with status "Locked" (firewall rules not yet open) and
     are excluded from automatic VLAN allocation until unlocked. Intended to be
     called by the service responsible for opening firewall rules once it has
     done so. This is a one-way lifecycle transition — there is no endpoint to
-    re-lock a segment.
+    re-lock a segment. Idempotent.
     """
-    return await SegmentService.unlock_segment(segment_id)
+    return await SegmentService.unlock_segment_by_segment(request.segment)
 
-@router.delete("/segments/{segment_id}")
-async def delete_segment(
-    segment_id: str
-):
-    """Delete a segment"""
-    return await SegmentService.delete_segment(segment_id)
+@router.delete("/segments")
+async def delete_segment(segment: str):
+    """Delete a segment identified by its CIDR value (e.g. ?segment=192.168.1.0/24)"""
+    return await SegmentService.delete_segment(segment)
 
 @router.post("/segments/bulk")
 async def create_segments_bulk(

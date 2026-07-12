@@ -1,4 +1,4 @@
-from typing import Optional, Literal
+from typing import List, Optional, Literal
 from datetime import datetime
 from pydantic import BaseModel, Field
 
@@ -84,6 +84,73 @@ class SegmentUnlock(BaseModel):
             "examples": [
                 {
                     "segment": "192.168.1.0/24"
+                }
+            ]
+        }
+    }
+
+
+class SegmentConnectivityRequestsUpdate(BaseModel):
+    """Pending connectivity (firewall) request ids to display for a segment.
+
+    Sent by the connectivity orchestrator while its firewall requests await
+    approval; the UI shows the ids beside the segment's status. An empty list
+    clears the display (all requests completed).
+    """
+    segment: str = Field(..., description="Network segment in CIDR notation (unique per segment)", examples=["192.168.1.0/24"])
+    request_ids: List[int] = Field(..., description="Pending connectivity request ids; an empty list clears the display", examples=[[123456, 654321]])
+
+    model_config = {
+        "extra": "forbid",
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "segment": "192.168.1.0/24",
+                    "request_ids": [123456, 654321]
+                }
+            ]
+        }
+    }
+
+
+class SegmentDhcpUpdate(BaseModel):
+    """Update request keyed by the segment's natural key (its CIDR).
+
+    `dhcp` is the only mutable segment field — everything else (site, vlan_id,
+    epg_name, segment) is immutable after creation, and lifecycle fields are
+    server-managed.
+    """
+    segment: str = Field(..., description="Network segment in CIDR notation (unique per segment)", examples=["192.168.1.0/24"])
+    dhcp: bool = Field(..., description="New DHCP setting for this segment")
+
+    model_config = {
+        "extra": "forbid",
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "segment": "192.168.1.0/24",
+                    "dhcp": True
+                }
+            ]
+        }
+    }
+
+
+class SegmentClustersUpdate(BaseModel):
+    segment: str = Field(..., description="Network segment in CIDR notation (unique per segment)", examples=["192.168.1.0/24"])
+    cluster_names: Optional[str] = Field(
+        default=None,
+        description="Comma-separated cluster names to assign; empty or omitted releases the segment",
+        examples=["cluster-prod-01,cluster-prod-02"],
+    )
+
+    model_config = {
+        "extra": "forbid",
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "segment": "192.168.1.0/24",
+                    "cluster_names": "cluster-prod-01,cluster-prod-02"
                 }
             ]
         }

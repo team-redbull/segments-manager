@@ -1009,6 +1009,85 @@ td.copyable:focus-visible .copyable__icon {
     font-family: var(--font-mono);
 }
 
+/* Pending connectivity request ids (button in the status cell + its popover).
+   Styled as a transient, "live" indicator — a ghost pill with a dashed border
+   and a pulsing dot — so it reads as a temporary, in-flight state rather than a
+   permanent UI action, and stays visually distinct from the (amber) Locked
+   status badge it can sit beside. */
+.req-ids-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    margin-left: var(--space-2);
+    padding: 2px 9px 2px 7px;
+    border-radius: var(--radius-pill);
+    font-size: 0.7rem;
+    font-weight: 600;
+    font-family: inherit;
+    background: transparent;
+    color: var(--text-muted);
+    border: 1px dashed var(--border-strong);
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background var(--dur) var(--ease), color var(--dur) var(--ease),
+        border-color var(--dur) var(--ease);
+}
+.req-ids-btn::before {
+    content: "";
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--primary);
+    flex-shrink: 0;
+    animation: req-ids-pulse 1.8s var(--ease) infinite;
+}
+.req-ids-btn:hover,
+.req-ids-btn[aria-expanded="true"] {
+    background: var(--surface-hover);
+    color: var(--text);
+    border-color: var(--primary);
+    border-style: solid;
+}
+
+@keyframes req-ids-pulse {
+    0% {
+        box-shadow: 0 0 0 0 var(--ring);
+    }
+    70% {
+        box-shadow: 0 0 0 4px transparent;
+    }
+    100% {
+        box-shadow: 0 0 0 0 transparent;
+    }
+}
+
+.req-ids-popover {
+    position: fixed;
+    z-index: var(--z-toast);
+    min-width: 130px;
+    max-height: 240px;
+    overflow-y: auto;
+    padding: var(--space-2) var(--space-3);
+    background: var(--surface-2);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-md);
+}
+.req-ids-popover__title {
+    font-size: 0.68rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-muted);
+    margin-bottom: var(--space-1);
+}
+.req-ids-popover__id {
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    color: var(--text);
+    padding: 2px 0;
+}
+
 /* Empty / error states */
 .state-cell {
     padding: var(--space-7) var(--space-5) !important;
@@ -1286,6 +1365,9 @@ td.copyable:focus-visible .copyable__icon {
 }
 .method.put {
     background: #d97706;
+}
+.method.patch {
+    background: #9333ea;
 }
 .method.delete {
     background: #dc2626;

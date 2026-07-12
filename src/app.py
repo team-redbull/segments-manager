@@ -103,6 +103,31 @@ app.add_middleware(
 # Include API routes
 app.include_router(router, prefix="/api")
 
+
+# Auth is enforced by the middleware above, not by per-route dependencies, so
+# FastAPI generates no security scheme on its own and /docs would offer no way
+# to send the token. Declare the Bearer scheme here (documentation only) so
+# Swagger UI shows the Authorize button.
+def custom_openapi():
+    if app.openapi_schema:
+        return app.openapi_schema
+    from fastapi.openapi.utils import get_openapi
+
+    schema = get_openapi(
+        title=app.title,
+        version=app.version,
+        routes=app.routes,
+    )
+    schema.setdefault("components", {})["securitySchemes"] = {
+        "BearerAuth": {"type": "http", "scheme": "bearer"}
+    }
+    schema["security"] = [{"BearerAuth": []}]
+    app.openapi_schema = schema
+    return schema
+
+
+app.openapi = custom_openapi
+
 # HTML UI - Serve static HTML file
 @app.get("/", response_class=HTMLResponse)
 async def read_root():

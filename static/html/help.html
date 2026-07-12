@@ -84,12 +84,12 @@
             </ul>
 
             <h3>Segment types</h3>
-            <p>Every segment has a <code>type</code>, one of <code>MCE</code>, <code>INVENTORY</code>, <code>HC</code>, <code>PXE</code>. Optional — defaults to <code>HC</code> if omitted when creating or updating a segment.</p>
+            <p>Every segment has a <code>type</code>, one of <code>MCE</code>, <code>INVENTORY</code>, <code>HC</code>, <code>PXE</code>. Optional — defaults to <code>HC</code> if omitted when creating a segment.</p>
 
             <h3>Segment states</h3>
             <p>Every segment carries a <code>status</code> field. Lifecycle: <code>Locked → Available → Allocated → Available</code>. Locking is one-way — once unlocked, a segment can never become locked again via the API.</p>
             <ul>
-                <li><strong>Locked</strong> — the default status for a newly-created segment. Firewall rules for the segment have not been opened yet, so it's excluded from automatic allocation. An external service unlocks it via <code>POST /api/segments/unlock</code> (by CIDR) or <code>POST /api/segments/{id}/unlock</code> once provisioning is complete.</li>
+                <li><strong>Locked</strong> — the default status for a newly-created segment. Firewall rules for the segment have not been opened yet, so it's excluded from automatic allocation. An external service unlocks it via <code>POST /api/segments/unlock</code> (by CIDR) once provisioning is complete. While firewall requests await approval, the orchestrator publishes their ids via <code>PUT /api/segments/connectivity-requests</code>; the table then shows a <strong>Requests ID</strong> button beside the status badge (click for a popover with the pending ids) until the requests complete.</li>
                 <li><strong>Available</strong> — unlocked and not allocated to any cluster (including previously-released segments; the <code>released</code> flag records that history).</li>
                 <li><strong>Allocated</strong> — assigned to one or more clusters.</li>
             </ul>
@@ -111,7 +111,7 @@
             </h2>
 
             <h3>Main dashboard</h3>
-            <p>The web UI is a <strong>read-only</strong> visualization of the segments stored in MongoDB. It shows per-site statistics and the full segments table, with search, status filters (All / Available / Allocated), and a site filter.</p>
+            <p>The web UI is a <strong>read-only</strong> visualization of the segments stored in MongoDB. It shows per-site statistics and the full segments table, with search, status filters (All / Available / Allocated), and a site filter. When a segment has firewall requests awaiting approval, a <strong>Requests ID</strong> button appears beside its status badge — click it for a small popover listing the pending request ids; it disappears automatically once the requests complete.</p>
 
             <h3>Exporting data</h3>
             <ul>
@@ -133,8 +133,8 @@
             <h3>Creating shared segments</h3>
             <p>Use the API to set multiple cluster names on a segment:</p>
             <ol>
-                <li>Call <code>PUT /api/segments/{id}/clusters</code></li>
-                <li>Set <code>cluster_names</code> to a comma-separated list, e.g. <code>cluster1,cluster2,cluster3</code></li>
+                <li>Call <code>PUT /api/segments/clusters</code></li>
+                <li>Set <code>segment</code> to the segment's CIDR and <code>cluster_names</code> to a comma-separated list, e.g. <code>cluster1,cluster2,cluster3</code></li>
             </ol>
 
             <h3>Managing shared segments</h3>
@@ -165,7 +165,7 @@
                 <svg viewBox="0 0 24 24" class="icon"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
                 API reference
             </h2>
-            <p>All endpoints use JSON and are prefixed with <code>/api</code>.</p>
+            <p>All endpoints use JSON and are prefixed with <code>/api</code>. Single-segment operations are identified by the segment's CIDR value (its natural key — unique and immutable), never by a database id: reads and deletes take it as a <code>?segment=</code> query parameter, writes carry it in the request body.</p>
 
             <div class="callout">
                 <svg viewBox="0 0 24 24" class="icon icon-sm"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
@@ -211,45 +211,50 @@
 }</div>
 
             <div class="endpoint">
-                <span class="method post">POST</span>
-                <span class="endpoint__path">/api/segments/{id}/unlock</span>
-                <span class="endpoint__desc">— Unlock a segment by id (no request body)</span>
+                <span class="method put">PUT</span>
+                <span class="endpoint__path">/api/segments/connectivity-requests</span>
+                <span class="endpoint__desc">— Set the pending connectivity request ids shown in the UI (empty list clears the display)</span>
             </div>
+            <div class="code-block">{
+  "segment": "192.168.1.0/24",
+  "request_ids": [123456, 654321]
+}</div>
 
             <div class="endpoint">
                 <span class="method get">GET</span>
-                <span class="endpoint__path">/api/segments/{id}</span>
-                <span class="endpoint__desc">— Get a specific segment</span>
+                <span class="endpoint__path">/api/segments/by-segment</span>
+                <span class="endpoint__desc">— Get a specific segment by CIDR</span>
             </div>
+            <div class="code-block">Query parameters:
+- segment (required): The segment CIDR, e.g. ?segment=192.168.1.0/24</div>
 
             <div class="endpoint">
-                <span class="method put">PUT</span>
-                <span class="endpoint__path">/api/segments/{id}</span>
-                <span class="endpoint__desc">— Update a segment</span>
+                <span class="method patch">PATCH</span>
+                <span class="endpoint__path">/api/segments</span>
+                <span class="endpoint__desc">— Update a segment's DHCP flag (the only mutable field)</span>
             </div>
             <div class="code-block">{
-  "type": "MCE",
-  "site": "site1",
-  "vlan_id": 100,
-  "epg_name": "EPG_UPDATED",
   "segment": "192.168.1.0/24",
   "dhcp": true
 }</div>
 
             <div class="endpoint">
                 <span class="method put">PUT</span>
-                <span class="endpoint__path">/api/segments/{id}/clusters</span>
-                <span class="endpoint__desc">— Update cluster assignment</span>
+                <span class="endpoint__path">/api/segments/clusters</span>
+                <span class="endpoint__desc">— Update cluster assignment (empty releases the segment)</span>
             </div>
             <div class="code-block">{
+  "segment": "192.168.1.0/24",
   "cluster_names": "cluster1,cluster2,cluster3"
 }</div>
 
             <div class="endpoint">
                 <span class="method delete">DELETE</span>
-                <span class="endpoint__path">/api/segments/{id}</span>
-                <span class="endpoint__desc">— Delete a segment (only if not allocated)</span>
+                <span class="endpoint__path">/api/segments</span>
+                <span class="endpoint__desc">— Delete a segment by CIDR (only if not allocated)</span>
             </div>
+            <div class="code-block">Query parameters:
+- segment (required): The segment CIDR, e.g. ?segment=192.168.1.0/24</div>
 
             <h3>Segment allocation</h3>
             <div class="endpoint">
@@ -355,11 +360,12 @@ curl -X POST "http://localhost:8000/api/allocate-segment" \
     "site": "site1"
   }'
 
-# 2. Update to share with multiple clusters
-curl -X PUT "http://localhost:8000/api/segments/{segment_id}/clusters" \
+# 2. Update to share with multiple clusters (keyed by the segment CIDR)
+curl -X PUT "http://localhost:8000/api/segments/clusters" \
   -H "Authorization: Bearer $API_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
+    "segment": "192.168.15.0/24",
     "cluster_names": "frontend,backend,database"
   }'</div>
 

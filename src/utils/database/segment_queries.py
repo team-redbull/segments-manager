@@ -7,7 +7,7 @@ import re
 import logging
 from typing import Optional, List, Dict, Any
 
-from ...database import get_segments, get_segment_by_id as _get_segment_by_id
+from ...database import get_segments
 
 logger = logging.getLogger(__name__)
 
@@ -31,15 +31,6 @@ class SegmentQueries:
         """Check if VLAN ID already exists for this site."""
         results = await get_segments(site=site, vlan_id=vlan_id)
         return len(results) > 0
-
-    @staticmethod
-    async def check_vlan_exists_excluding_id(site: str, vlan_id: int, exclude_id: str) -> bool:
-        """Check if VLAN ID exists for this site, excluding a specific segment ID."""
-        results = await get_segments(site=site, vlan_id=vlan_id)
-        existing = next((s for s in results if str(s.get("_id")) != str(exclude_id)), None)
-        if existing:
-            logger.debug(f"Found existing VLAN: {existing.get('_id')} (excluding {exclude_id})")
-        return existing is not None
 
     @staticmethod
     async def search_segments(

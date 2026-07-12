@@ -8,7 +8,6 @@ from typing import Optional, Dict, Any
 
 from ...database import (
     create_segment as _create_segment,
-    get_segment_by_id as _get_segment_by_id,
     get_segment_by_segment as _get_segment_by_segment,
     update_segment as _update_segment,
     delete_segment as _delete_segment,
@@ -44,11 +43,6 @@ class SegmentCRUD:
         else:
             logger.warning(f"Unexpected return type from create_segment: {type(result)}, value: {result}")
             return str(result.get("_id", result)) if isinstance(result, dict) else str(result)
-
-    @staticmethod
-    async def get_segment_by_id(segment_id: str) -> Optional[Dict[str, Any]]:
-        """Get segment by ID"""
-        return await _get_segment_by_id(segment_id)
 
     @staticmethod
     async def get_segment_by_segment(segment: str) -> Optional[Dict[str, Any]]:

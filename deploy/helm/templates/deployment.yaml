@@ -51,11 +51,6 @@ spec:
               protocol: TCP
           env:
             # Site configuration from ConfigMap
-            - name: SITES
-              valueFrom:
-                configMapKeyRef:
-                  name: {{ include "segments-manager.fullname" . }}
-                  key: SITES
             - name: SITE_PREFIXES
               valueFrom:
                 configMapKeyRef:

@@ -43,7 +43,6 @@ else
     # Set defaults (WARNING: MONGODB_URL must point at a reachable MongoDB)
     export MONGODB_URL="${MONGODB_URL:-mongodb://localhost:27017}"
     export MONGODB_DB_NAME="${MONGODB_DB_NAME:-segments_manager}"
-    export SITES="${SITES:-site1,site2,site3}"
     export SITE_PREFIXES="${SITE_PREFIXES:-site1:192,site2:193,site3:194}"
     export SERVER_HOST="${SERVER_HOST:-0.0.0.0}"
     export SERVER_PORT="${SERVER_PORT:-8000}"
@@ -53,7 +52,6 @@ fi
 echo ""
 echo "🔧 Environment Configuration:"
 echo "   MongoDB DB: $MONGODB_DB_NAME"
-echo "   Sites: $SITES"
 echo "   Site Prefixes: $SITE_PREFIXES"
 # Mask credentials in the connection string before printing
 echo "   MongoDB URL: $(echo "$MONGODB_URL" | sed -E 's#://[^@]*@#://****:****@#')"
@@ -83,7 +81,6 @@ podman run -d \
     -p 8000:8000 \
     -e MONGODB_URL="$MONGODB_URL" \
     -e MONGODB_DB_NAME="$MONGODB_DB_NAME" \
-    -e SITES="$SITES" \
     -e SITE_PREFIXES="$SITE_PREFIXES" \
     -e SERVER_HOST="$SERVER_HOST" \
     -e SERVER_PORT="$SERVER_PORT" \
@@ -124,7 +121,7 @@ if [ $? -eq 0 ]; then
         echo "🔍 Troubleshooting:"
         echo "   1. Check MongoDB connectivity (MONGODB_URL reachable from the container)"
         echo "   2. Verify MongoDB credentials in MONGODB_URL are valid"
-        echo "   3. Verify all environment variables are set (especially SITES and SITE_PREFIXES)"
+        echo "   3. Verify all environment variables are set (especially SITE_PREFIXES)"
         echo "   4. Check container logs: podman logs $CONTAINER_NAME"
     fi
     

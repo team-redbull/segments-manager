@@ -19,7 +19,6 @@ class Validators:
 
     # Input validation methods
     validate_site = staticmethod(InputValidators.validate_site)
-    validate_object_id = staticmethod(InputValidators.validate_object_id)
     validate_epg_name = staticmethod(InputValidators.validate_epg_name)
     validate_vlan_id = staticmethod(InputValidators.validate_vlan_id)
     validate_cluster_name = staticmethod(InputValidators.validate_cluster_name)

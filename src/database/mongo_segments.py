@@ -103,14 +103,6 @@ async def get_segments(
     ]
 
 
-async def get_segment_by_id(segment_id: str) -> Optional[Dict[str, Any]]:
-    """Return a single segment by its ID, or None if not found."""
-    oid = _to_object_id(segment_id)
-    col = get_segments_collection()
-    doc = await col.find_one({"_id": oid})
-    return _doc_to_segment(doc) if doc else None
-
-
 async def get_segment_by_segment(segment: str) -> Optional[Dict[str, Any]]:
     """Return a single segment by its CIDR value (unique index), or None if not found."""
     col = get_segments_collection()
@@ -130,7 +122,7 @@ async def create_segment(document: Dict[str, Any]) -> Dict[str, Any]:
     doc.setdefault("released_at", None)
     # New segments start in the "Locked" lifecycle status (firewall rules not
     # yet open) until an external service unlocks them via
-    # POST /segments/unlock (or /segments/{id}/unlock). Lifecycle:
+    # POST /segments/unlock (keyed by the segment CIDR). Lifecycle:
     # Locked -> Available -> Allocated -> Available.
     doc.setdefault("status", STATUS_LOCKED)
 

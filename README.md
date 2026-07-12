@@ -17,6 +17,9 @@ Segments Manager is **decentralized and per-site**: VLAN IDs and EPG names are u
 - **MongoDB backend** — async (Motor) with atomic allocation and a short in-memory cache
 - **CSV/Excel export** and real-time search
 - **Responsive web UI** with light/dark themes
+- **Pending firewall-request visibility** — while the connectivity orchestrator waits
+  for firewall approval, a **Requests ID** button next to the segment's status opens
+  a popover with the pending request ids (cleared automatically on completion)
 - **Health monitoring** — `/api/health` pings MongoDB
 
 ---
@@ -50,7 +53,7 @@ pip install -r requirements.txt
 
 # Configure environment
 cp .env.example .env
-# Edit .env: MONGODB_URL, SITES, SITE_PREFIXES
+# Edit .env: MONGODB_URL, SITE_PREFIXES
 
 # Run
 python main.py           # http://localhost:8000
@@ -72,7 +75,6 @@ podman run -d --name segments-manager -p 8000:8000 --env-file .env segments-mana
 ```bash
 helm install segments-manager deploy/helm \
   --set mongodb.url="mongodb+srv://user:pass@cluster/..." \
-  --set config.sites="site1,site2,site3" \
   --set config.sitePrefixes="site1:192,site2:193,site3:194"
 ```
 
@@ -89,10 +91,8 @@ Use `--set mongodb.existingSecret=<name>` to source `MONGODB_URL` from an existi
 MONGODB_URL=mongodb://localhost:27017        # or mongodb+srv://... for Atlas
 MONGODB_DB_NAME=segments_manager                 # optional (default: segments_manager)
 
-# Sites (Required)
-SITES=site1,site2,site3
-
-# Site IP Prefix Validation (Required) — every site MUST have an entry
+# Sites (Required) — the single source of truth for configured sites,
+# formatted as site:first-octet. The list of sites is derived from its keys.
 SITE_PREFIXES=site1:192,site2:193,site3:194
 
 # Server (Optional)
@@ -104,7 +104,7 @@ LOG_LEVEL=INFO
 API_TOKEN=change-me-to-a-long-random-secret   # REQUIRED — the only credential for write requests
 ```
 
-**Fail-fast validation**: the app crashes at startup if `MONGODB_URL` or `API_TOKEN` is unset, or if any site in `SITES` lacks a `SITE_PREFIXES` entry.
+**Fail-fast validation**: the app crashes at startup if `MONGODB_URL` or `API_TOKEN` is unset, or if `SITE_PREFIXES` is empty/unset.
 
 ---
 
@@ -115,10 +115,12 @@ API_TOKEN=change-me-to-a-long-random-secret   # REQUIRED — the only credential
 | GET  | `/api/segments` | List segments (filter by `site`, `allocated`) |
 | GET  | `/api/segments/search?q=` | Search by cluster, EPG, VLAN, segment |
 | POST | `/api/segments` | Create a segment *(auth)* |
-| GET  | `/api/segments/{id}` | Get one segment |
-| PUT  | `/api/segments/{id}` | Update a segment *(auth)* |
-| PUT  | `/api/segments/{id}/clusters` | Update cluster assignment *(auth)* |
-| DELETE | `/api/segments/{id}` | Delete a segment *(auth)* |
+| GET  | `/api/segments/by-segment?segment=` | Get one segment by CIDR |
+| PATCH | `/api/segments` | Update a segment's DHCP flag *(auth)* |
+| PUT  | `/api/segments/clusters` | Update cluster assignment *(auth)* |
+| POST | `/api/segments/unlock` | Unlock a segment (Locked → Available) *(auth)* |
+| PUT  | `/api/segments/connectivity-requests` | Set the pending connectivity request ids shown in the UI (empty list clears) *(auth)* |
+| DELETE | `/api/segments?segment=` | Delete a segment by CIDR *(auth)* |
 | POST | `/api/segments/bulk` | Bulk create *(auth)* |
 | POST | `/api/allocate-segment` | Allocate a segment for a cluster *(auth)* |
 | POST | `/api/release-segment` | Release a cluster's allocation *(auth)* |
@@ -126,6 +128,8 @@ API_TOKEN=change-me-to-a-long-random-secret   # REQUIRED — the only credential
 | GET  | `/api/stats` | Per-site statistics |
 | GET  | `/api/health` | Health check (MongoDB connectivity) |
 | GET  | `/api/export/segments/{csv,excel}` | Export segments |
+
+Single-segment operations are keyed by the segment **CIDR** (the natural key — unique and immutable), never by a database id: reads and deletes take it as a `?segment=` query parameter, writes carry it in the request body.
 
 **Read (`GET`) endpoints are open; every write (`POST`/`PUT`/`PATCH`/`DELETE`) requires the API token** as a `Authorization: Bearer <API_TOKEN>` header. The token is the only credential — there is no username/password login. Example:
 

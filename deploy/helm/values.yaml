@@ -47,7 +47,6 @@ route:
 
 # Application ConfigMap
 config:
-  sites: "site1,site2,site3"
   sitePrefixes: "site1:192,site2:193,site3:194"
   serverHost: "0.0.0.0"
   serverPort: "8000"
@@ -56,6 +55,9 @@ config:
   # default). If you switch to a non-root securityContext, point this at a
   # writable directory such as /app/data/segments_manager.log.
   logFile: "segments_manager.log"
+  # Base URL of the Cluster Orchestrator's unified workflows API - REQUIRED.
+  # Every segment creation triggers the connectivity workflow there.
+  workflowsApiUrl: "http://connectivity-api:8080"
 
 # MongoDB Configuration
 mongodb:
@@ -78,13 +80,25 @@ mongodb:
 
 # Authentication
 auth:
-  # API token - REQUIRED (stored in a Secret). Clients send it as
-  # `Authorization: Bearer <token>` on every write (POST/PUT/PATCH/DELETE)
-  # request; GET requests are open. Set a long, random secret before deploying.
-  apiToken: "7f3a8b9c-2e1d-4f5a-b6c7-8d9e0f1a2b3c"
+  # API token — the Bearer credential for every write (POST/PUT/PATCH/DELETE)
+  # request; GET requests are open. NEVER commit a real token here.
+  #
+  # Recommended: manage the token out-of-band and reference it via
+  # `existingSecret` below, so the value never lives in git or Helm values:
+  #
+  #   oc create secret generic segments-manager-api-token \
+  #     --from-literal=api-token="$(openssl rand -hex 32)"
+  #
+  # `apiToken` is only consulted when `existingSecret` is empty (the chart then
+  # creates its own Secret from this value). Keep it blank; if you must use the
+  # chart-managed path, inject it at deploy time via --set/-f from a secure
+  # source (CI secret, Vault), never by editing it in git.
+  apiToken: ""
 
-  # Use an existing secret for the API token (optional)
-  existingSecret: ""
+  # Use an existing, out-of-band Secret for the API token (recommended). When
+  # set, the chart does NOT create its own auth Secret — it references this one,
+  # so the token value never passes through git or Helm values.
+  existingSecret: "segments-manager-api-token"
   existingSecretKey: "api-token"
 
 # Persistent Volume Claim

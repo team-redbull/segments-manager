@@ -79,7 +79,6 @@ MONGODB_URL=mongodb://user:pass@mongodb-host:27017
 MONGODB_DB_NAME=segments_manager
 
 # Site Configuration (Required)
-SITES=site1,site2,site3
 SITE_PREFIXES=site1:192,site2:193,site3:194
 
 # Server Configuration (Optional)

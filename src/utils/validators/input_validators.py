@@ -30,17 +30,6 @@ class InputValidators:
             )
 
     @staticmethod
-    def validate_object_id(object_id: str) -> None:
-        """Validate ID format (simple validation for string IDs)"""
-        logger.debug(f"Validating ID: {object_id}")
-        if not object_id or not isinstance(object_id, str):
-            logger.warning(f"Invalid ID format: {object_id}")
-            raise HTTPException(
-                status_code=400,
-                detail="Invalid ID format"
-            )
-
-    @staticmethod
     def validate_epg_name(epg_name: str) -> None:
         """Validate that EPG name is not empty or whitespace only"""
         logger.debug(f"Validating EPG name: '{epg_name}'")

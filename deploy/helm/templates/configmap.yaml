@@ -10,7 +10,6 @@ metadata:
   {{- end }}
 data:
   # Site configuration
-  SITES: {{ .Values.config.sites | quote }}
   SITE_PREFIXES: {{ .Values.config.sitePrefixes | quote }}
 
   # Server configuration
@@ -24,3 +23,6 @@ data:
   # MongoDB configuration (URL itself comes from the Secret)
   MONGODB_DB_NAME: {{ .Values.mongodb.dbName | quote }}
   MONGODB_TLS_INSECURE: {{ .Values.mongodb.tlsInsecure | quote }}
+
+  # Cluster Orchestrator workflows API (connectivity workflow trigger)
+  WORKFLOWS_API_URL: {{ .Values.config.workflowsApiUrl | quote }}

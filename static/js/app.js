@@ -688,6 +688,42 @@ function updateSegmentCount(n) {
     if (el) el.textContent = n + (n === 1 ? " segment" : " segments");
 }
 
+// ---- Connectivity request-ids popover ---------------------------------------
+// While the connectivity orchestrator has firewall requests awaiting approval
+// for a segment, the row's status cell shows a "Requests ID" button; clicking
+// it opens a small popover (anchored to the button) listing the pending ids.
+let reqIdsAnchor = null;
+
+function closeReqIdsPopover() {
+    const popover = document.getElementById("reqIdsPopover");
+    if (popover) popover.remove();
+    if (reqIdsAnchor) {
+        reqIdsAnchor.setAttribute("aria-expanded", "false");
+        reqIdsAnchor = null;
+    }
+}
+
+function openReqIdsPopover(btn) {
+    closeReqIdsPopover();
+    let ids = [];
+    try {
+        ids = JSON.parse(btn.getAttribute("data-request-ids")) || [];
+    } catch (e) {}
+    const popover = document.createElement("div");
+    popover.id = "reqIdsPopover";
+    popover.className = "req-ids-popover";
+    popover.setAttribute("role", "dialog");
+    popover.setAttribute("aria-label", "Pending connectivity request IDs");
+    popover.innerHTML = ids.map((id) => `<div class="req-ids-popover__id">${escapeHTML(id)}</div>`).join("");
+    document.body.appendChild(popover);
+    // Anchor just below the button, clamped to the viewport (position: fixed).
+    const rect = btn.getBoundingClientRect();
+    popover.style.top = Math.min(rect.bottom + 6, window.innerHeight - popover.offsetHeight - 8) + "px";
+    popover.style.left = Math.min(rect.left, window.innerWidth - popover.offsetWidth - 8) + "px";
+    btn.setAttribute("aria-expanded", "true");
+    reqIdsAnchor = btn;
+}
+
 // ---- Column sorting ----------------------------------------------------------
 let sortColumn = null;
 let sortDirection = "asc";
@@ -742,6 +778,8 @@ function updateSortHeaders() {
 }
 
 async function loadSegments(showSkeleton = false) {
+    // Every render path below rewrites the table, orphaning the popover's anchor.
+    closeReqIdsPopover();
     const container = document.getElementById("segmentsList");
     if (showSkeleton && container) {
         container.innerHTML = rowSkeleton().repeat(8);
@@ -790,6 +828,12 @@ async function loadSegments(showSkeleton = false) {
                 const statusLabel = segmentStatusLabel(segment);
                 const statusClass = statusLabel.toLowerCase();
                 const dhcp = segment.dhcp;
+                const reqIds = Array.isArray(segment.connectivity_requests)
+                    ? segment.connectivity_requests
+                    : [];
+                const reqIdsBtn = reqIds.length
+                    ? `<button type="button" class="req-ids-btn" aria-haspopup="dialog" aria-expanded="false" data-request-ids="${escapeHTML(JSON.stringify(reqIds))}">Request IDs</button>`
+                    : "";
                 return `
                 <tr>
                     <td data-col="type">${
@@ -809,7 +853,7 @@ async function loadSegments(showSkeleton = false) {
                             ? escapeHTML(segment.cluster_name)
                             : '<span class="cell-muted">—</span>'
                     }</td>
-                    <td data-col="status"><span class="badge ${statusClass}">${statusLabel}</span></td>
+                    <td data-col="status"><span class="badge ${statusClass}">${statusLabel}</span>${reqIdsBtn}</td>
                 </tr>`;
             })
             .join("");
@@ -958,18 +1002,32 @@ document.addEventListener("DOMContentLoaded", function () {
             columnsPopover.hidden = true;
             columnsBtn.setAttribute("aria-expanded", "false");
         }
+        if (
+            reqIdsAnchor &&
+            !e.target.closest(".req-ids-btn") &&
+            !e.target.closest(".req-ids-popover")
+        ) {
+            closeReqIdsPopover();
+        }
     });
     document.addEventListener("keydown", (e) => {
         if (e.key === "Escape") {
             closeFilterPopover();
+            closeReqIdsPopover();
             columnsPopover.hidden = true;
             columnsBtn.setAttribute("aria-expanded", "false");
         }
     });
 
-    // Click-to-copy (VLAN ID, EPG name, network segment cells)
+    // Click-to-copy (VLAN ID, EPG name, network segment cells) + request-ids popover
     const segmentsList = document.getElementById("segmentsList");
     segmentsList.addEventListener("click", (e) => {
+        const reqBtn = e.target.closest(".req-ids-btn");
+        if (reqBtn) {
+            if (reqIdsAnchor === reqBtn) closeReqIdsPopover();
+            else openReqIdsPopover(reqBtn);
+            return;
+        }
         const cell = e.target.closest(".copyable");
         if (cell) handleCopyableActivate(cell);
     });

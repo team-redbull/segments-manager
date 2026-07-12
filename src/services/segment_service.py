@@ -8,6 +8,7 @@ from ..utils.database_utils import DatabaseUtils
 from ..utils.validators import Validators
 from ..utils.error_handlers import handle_db_errors, retry_on_network_error
 from ..utils.logging_decorators import log_operation_timing
+from .workflow_client import trigger_connectivity_workflow
 
 logger = logging.getLogger(__name__)
 
@@ -15,7 +16,7 @@ class SegmentService:
     """Service class for segment management operations"""
 
     @staticmethod
-    async def _validate_segment_data(segment: Segment, exclude_id: str = None) -> None:
+    async def _validate_segment_data(segment: Segment) -> None:
         """Common validation for segment data"""
         Validators.validate_site(segment.site)
         Validators.validate_epg_name(segment.epg_name)
@@ -27,8 +28,6 @@ class SegmentService:
         Validators.validate_network_broadcast_gateway(segment.segment)
 
         existing_segments = await DatabaseUtils.get_segments_with_filters()
-        if exclude_id:
-            existing_segments = [s for s in existing_segments if str(s.get("_id")) != str(exclude_id)]
 
         Validators.validate_ip_overlap(segment.segment, existing_segments)
 
@@ -36,9 +35,21 @@ class SegmentService:
             site=segment.site,
             epg_name=segment.epg_name,
             vlan_id=segment.vlan_id,
-            existing_segments=existing_segments,
-            exclude_id=exclude_id
+            existing_segments=existing_segments
         )
+
+    @staticmethod
+    async def _get_segment_or_404(segment_value: str) -> Dict[str, Any]:
+        """Resolve a segment document by its CIDR value (the natural key).
+
+        The `segment` field is unique (unique index) and immutable, so it is
+        the public identifier for all single-segment API operations — callers
+        never need the internal Mongo ObjectId.
+        """
+        doc = await DatabaseUtils.get_segment_by_segment(segment_value.strip())
+        if not doc:
+            raise HTTPException(status_code=404, detail="Segment not found")
+        return doc
 
     @staticmethod
     def _segment_to_dict(segment: Segment) -> Dict[str, Any]:
@@ -100,85 +111,58 @@ class SegmentService:
         segment_id = await DatabaseUtils.create_segment(segment_data)
 
         logger.info(f"Created segment with ID: {segment_id}")
+
+        # Fire-and-return: kick off the (multi-day) connectivity workflow and
+        # respond as soon as it's been triggered, without waiting for it to
+        # complete. Best-effort — never fails the segment creation itself.
+        await trigger_connectivity_workflow(segment.segment, segment.type)
+
         return {"message": "Segment created", "id": segment_id}
 
     @staticmethod
     @handle_db_errors
     @retry_on_network_error(max_retries=3)
-    @log_operation_timing("get_segment_by_id", threshold_ms=500)
-    async def get_segment_by_id(segment_id: str) -> Dict[str, Any]:
-        """Get a single segment by ID"""
-        Validators.validate_object_id(segment_id)
-
-        segment = await DatabaseUtils.get_segment_by_id(segment_id)
-        if not segment:
-            raise HTTPException(status_code=404, detail="Segment not found")
-
-        if not isinstance(segment["_id"], str):
-            segment["_id"] = str(segment["_id"])
-
-        logger.debug(f"Retrieved segment {segment_id}: site={segment.get('site')}, vlan_id={segment.get('vlan_id')}")
+    @log_operation_timing("get_segment_by_segment", threshold_ms=500)
+    async def get_segment_by_segment(segment_value: str) -> Dict[str, Any]:
+        """Get a single segment by its CIDR value (the natural key)"""
+        segment = await SegmentService._get_segment_or_404(segment_value)
+        logger.debug(f"Retrieved segment {segment_value}: site={segment.get('site')}, vlan_id={segment.get('vlan_id')}")
         return segment
 
     @staticmethod
     @handle_db_errors
     @retry_on_network_error(max_retries=3)
-    @log_operation_timing("update_segment", threshold_ms=2000)
-    async def update_segment(segment_id: str, updated_segment: Segment) -> Dict[str, str]:
-        """Update a segment"""
-        Validators.validate_object_id(segment_id)
+    @log_operation_timing("update_segment_dhcp", threshold_ms=2000)
+    async def update_segment_dhcp(segment_value: str, dhcp: bool) -> Dict[str, str]:
+        """Update a segment's DHCP flag — the only mutable segment field.
 
-        await SegmentService._validate_segment_data(updated_segment, exclude_id=segment_id)
+        Everything else (site, vlan_id, epg_name, segment) is immutable after
+        creation; lifecycle fields (status, cluster_name, ...) are managed by
+        their own endpoints. Idempotent: setting the current value is a no-op.
+        """
+        existing_segment = await SegmentService._get_segment_or_404(segment_value)
 
-        existing_segment = await DatabaseUtils.get_segment_by_id(segment_id)
-        if not existing_segment:
-            raise HTTPException(status_code=404, detail="Segment not found")
+        if existing_segment.get("dhcp") == dhcp:
+            return {"message": "Segment already up to date"}
 
-        # VLAN ID is immutable
-        if existing_segment["vlan_id"] != updated_segment.vlan_id:
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "error": "vlan_id_immutable",
-                    "message": "VLAN ID cannot be changed after creation",
-                    "current_vlan_id": existing_segment["vlan_id"],
-                    "attempted_vlan_id": updated_segment.vlan_id,
-                    "suggestion": "Create a new segment with the desired VLAN ID and delete the old one if needed"
-                }
-            )
-
-        # Check if site change would conflict with existing VLAN at target site
-        if existing_segment["site"] != updated_segment.site:
-            if await DatabaseUtils.check_vlan_exists_excluding_id(updated_segment.site, updated_segment.vlan_id, segment_id):
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"VLAN {updated_segment.vlan_id} already exists at site '{updated_segment.site}'"
-                )
-
-        update_data = SegmentService._segment_to_dict(updated_segment)
-        success = await DatabaseUtils.update_segment_by_id(segment_id, update_data)
-
+        success = await DatabaseUtils.update_segment_by_id(str(existing_segment["_id"]), {"dhcp": dhcp})
         if not success:
             raise HTTPException(status_code=500, detail="Failed to update segment")
 
-        logger.info(f"Updated segment {segment_id}")
+        logger.info(f"Updated segment {segment_value}: dhcp={dhcp}")
         return {"message": "Segment updated successfully"}
 
     @staticmethod
     @handle_db_errors
     @retry_on_network_error(max_retries=3)
     @log_operation_timing("update_segment_clusters", threshold_ms=2000)
-    async def update_segment_clusters(segment_id: str, cluster_names: str) -> Dict[str, str]:
+    async def update_segment_clusters(segment_value: str, cluster_names: str) -> Dict[str, str]:
         """Update cluster assignment for a segment (for shared segments)"""
         from datetime import datetime, timezone
-        logger.info(f"Updating cluster assignment for segment: {segment_id}")
+        logger.info(f"Updating cluster assignment for segment: {segment_value}")
 
-        Validators.validate_object_id(segment_id)
-
-        existing_segment = await DatabaseUtils.get_segment_by_id(segment_id)
-        if not existing_segment:
-            logger.warning(f"Segment not found: {segment_id}")
-            raise HTTPException(status_code=404, detail="Segment not found")
+        existing_segment = await SegmentService._get_segment_or_404(segment_value)
+        segment_id = str(existing_segment["_id"])
 
         clean_cluster_names = cluster_names.strip() if cluster_names else None
 
@@ -209,37 +193,35 @@ class SegmentService:
         if not success:
             raise HTTPException(status_code=500, detail="Failed to update segment clusters")
 
-        logger.info(f"Updated cluster assignment for segment {segment_id}")
+        logger.info(f"Updated cluster assignment for segment {segment_value}")
         return {"message": "Segment cluster assignment updated successfully"}
 
     @staticmethod
     @handle_db_errors
     @retry_on_network_error(max_retries=3)
-    @log_operation_timing("unlock_segment", threshold_ms=2000)
-    async def unlock_segment(segment_id: str) -> Dict[str, str]:
-        """Unlock a segment (status "Locked" -> "Available").
+    @log_operation_timing("set_connectivity_requests", threshold_ms=2000)
+    async def set_connectivity_requests(segment_value: str, request_ids: List[int]) -> Dict[str, str]:
+        """Replace the pending connectivity request ids displayed for a segment.
 
-        "Locked" is the initial status of every new segment (firewall rules
-        not yet open), and segments are excluded from automatic VLAN
-        allocation until unlocked. This is a one-way lifecycle transition —
-        segments cannot be re-locked via the API. Idempotent: unlocking a
-        segment that is already "Available" (or "Allocated") is a no-op.
+        Set by the connectivity orchestrator while its firewall (open-rules)
+        requests await approval; the UI shows the ids beside the segment's
+        status. An empty list clears the display (all requests completed).
+        Idempotent: setting the current value is a no-op.
         """
-        Validators.validate_object_id(segment_id)
+        existing_segment = await SegmentService._get_segment_or_404(segment_value)
 
-        existing_segment = await DatabaseUtils.get_segment_by_id(segment_id)
-        if not existing_segment:
-            raise HTTPException(status_code=404, detail="Segment not found")
+        new_value = request_ids or None
+        if existing_segment.get("connectivity_requests") == new_value:
+            return {"message": "Segment already up to date"}
 
-        if existing_segment.get("status") != STATUS_LOCKED:
-            return {"message": "Segment already unlocked"}
-
-        success = await DatabaseUtils.update_segment_by_id(segment_id, {"status": STATUS_AVAILABLE})
+        success = await DatabaseUtils.update_segment_by_id(
+            str(existing_segment["_id"]), {"connectivity_requests": new_value}
+        )
         if not success:
-            raise HTTPException(status_code=500, detail="Failed to unlock segment")
+            raise HTTPException(status_code=500, detail="Failed to update segment")
 
-        logger.info(f"Segment {segment_id} unlocked (status: {STATUS_LOCKED} -> {STATUS_AVAILABLE})")
-        return {"message": "Segment unlocked successfully"}
+        logger.info(f"Updated segment {segment_value}: connectivity_requests={new_value}")
+        return {"message": "Segment connectivity requests updated"}
 
     @staticmethod
     @handle_db_errors
@@ -248,16 +230,15 @@ class SegmentService:
     async def unlock_segment_by_segment(segment: str) -> Dict[str, str]:
         """Unlock a segment identified by its CIDR value (status "Locked" -> "Available").
 
-        Same semantics as unlock_segment, but the segment is identified by its
-        natural key — the `segment` CIDR (unique index) — instead of the Mongo
-        ObjectId. Intended for callers (e.g. the connectivity orchestrator)
-        that know the network value but not the internal document id.
-        Idempotent: unlocking a segment that is already "Available" (or
+        "Locked" is the initial status of every new segment (firewall rules
+        not yet open), and segments are excluded from automatic VLAN
+        allocation until unlocked. Intended for callers (e.g. the
+        connectivity orchestrator) that know the network value. This is a
+        one-way lifecycle transition — segments cannot be re-locked via the
+        API. Idempotent: unlocking a segment that is already "Available" (or
         "Allocated") is a no-op.
         """
-        existing_segment = await DatabaseUtils.get_segment_by_segment(segment)
-        if not existing_segment:
-            raise HTTPException(status_code=404, detail="Segment not found")
+        existing_segment = await SegmentService._get_segment_or_404(segment)
 
         if existing_segment.get("status") != STATUS_LOCKED:
             return {"message": "Segment already unlocked"}
@@ -274,21 +255,17 @@ class SegmentService:
     @handle_db_errors
     @retry_on_network_error(max_retries=3)
     @log_operation_timing("delete_segment", threshold_ms=2000)
-    async def delete_segment(segment_id: str) -> Dict[str, str]:
-        """Delete a segment"""
-        Validators.validate_object_id(segment_id)
-
-        segment = await DatabaseUtils.get_segment_by_id(segment_id)
-        if not segment:
-            raise HTTPException(status_code=404, detail="Segment not found")
+    async def delete_segment(segment_value: str) -> Dict[str, str]:
+        """Delete a segment identified by its CIDR value"""
+        segment = await SegmentService._get_segment_or_404(segment_value)
 
         Validators.validate_segment_not_allocated(segment)
 
-        success = await DatabaseUtils.delete_segment_by_id(segment_id)
+        success = await DatabaseUtils.delete_segment_by_id(str(segment["_id"]))
         if not success:
             raise HTTPException(status_code=500, detail="Failed to delete segment")
 
-        logger.info(f"Deleted segment {segment_id}")
+        logger.info(f"Deleted segment {segment_value}")
         return {"message": "Segment deleted"}
 
     @staticmethod
@@ -340,6 +317,9 @@ class SegmentService:
 
                     segment_data = SegmentService._segment_to_dict(segment)
                     new_segment = await DatabaseUtils.create_segment(segment_data)
+
+                    # Best-effort — never fails this row's creation.
+                    await trigger_connectivity_workflow(segment.segment, segment.type)
 
                     created_in_bulk.add(segment_key)
                     existing_segments.append(new_segment if isinstance(new_segment, dict) else segment_data)

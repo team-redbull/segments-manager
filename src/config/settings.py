@@ -2,6 +2,14 @@ import os
 import logging
 import sys
 
+from dotenv import load_dotenv
+
+# Load .env for local development. Existing environment variables always take
+# precedence (load_dotenv never overrides them), so container/Helm deployments
+# that inject real env vars are unaffected. This module is the first project
+# import on every entry path, so the file is loaded before any os.getenv call.
+load_dotenv()
+
 # MongoDB Configuration
 MONGODB_URL = os.getenv("MONGODB_URL")
 MONGODB_DB_NAME = os.getenv("MONGODB_DB_NAME", "segments_manager")
@@ -23,11 +31,26 @@ if not MONGODB_URL:
     print(f"ERROR: {error_msg}", file=sys.stderr)
     raise ValueError(error_msg)
 
-# Sites Configuration
-SITES = os.getenv("SITES", "site1,site2,site3").split(",")
-SITES = [s.strip() for s in SITES if s.strip()]
+# Cluster Orchestrator workflows API — base URL of the unified FastAPI service
+# (api.py in the workflows repo) that starts the connectivity workflow.
+# Required: segment creation triggers it, so a missing URL must fail loudly at
+# startup rather than silently skipping the trigger in production.
+WORKFLOWS_API_URL = os.getenv("WORKFLOWS_API_URL")
 
-# Site IP Prefix Configuration
+if not WORKFLOWS_API_URL:
+    error_msg = (
+        "CRITICAL CONFIGURATION ERROR: WORKFLOWS_API_URL environment variable is not set!\n"
+        "Please set WORKFLOWS_API_URL in your environment or .env file.\n"
+        "Example: export WORKFLOWS_API_URL='http://localhost:8080'"
+    )
+    print(f"ERROR: {error_msg}", file=sys.stderr)
+    raise ValueError(error_msg)
+
+WORKFLOWS_API_URL = WORKFLOWS_API_URL.rstrip("/")
+
+# Site IP Prefix Configuration — the single source of truth for configured
+# sites. SITES is derived from its keys rather than being its own env var,
+# so the two can never drift out of sync.
 # Format: "site1:192,site2:193,site3:194"
 SITE_PREFIXES_ENV = os.getenv("SITE_PREFIXES", "")
 
@@ -49,27 +72,16 @@ def parse_site_prefixes(site_prefixes_str: str) -> dict:
 
 
 SITE_IP_PREFIXES = parse_site_prefixes(SITE_PREFIXES_ENV)
+SITES = list(SITE_IP_PREFIXES.keys())
 
 
 def validate_site_prefixes():
-    """Validate that all configured sites have IP prefixes defined. Fail fast at startup."""
+    """Validate that at least one site is configured. Fail fast at startup."""
     if not SITE_IP_PREFIXES:
         error_msg = (
-            f"CRITICAL CONFIGURATION ERROR: No site IP prefixes configured!\n"
-            f"Configured sites: {SITES}\n"
-            f"Please set SITE_PREFIXES environment variable.\n"
-            f"Example: SITE_PREFIXES=\"site1:192,site2:193,site3:194\""
-        )
-        print(f"ERROR: {error_msg}", file=sys.stderr)
-        raise ValueError(error_msg)
-
-    missing = [s for s in SITES if s not in SITE_IP_PREFIXES and s.lower() not in SITE_IP_PREFIXES]
-    if missing:
-        error_msg = (
-            f"CRITICAL CONFIGURATION ERROR: Sites {missing} are missing IP prefixes!\n"
-            f"Configured sites: {SITES}\n"
-            f"Available prefixes: {SITE_IP_PREFIXES}\n"
-            f"Please add missing prefixes to SITE_PREFIXES environment variable."
+            "CRITICAL CONFIGURATION ERROR: No site IP prefixes configured!\n"
+            "Please set SITE_PREFIXES environment variable.\n"
+            "Example: SITE_PREFIXES=\"site1:192,site2:193,site3:194\""
         )
         print(f"ERROR: {error_msg}", file=sys.stderr)
         raise ValueError(error_msg)

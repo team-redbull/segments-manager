@@ -9,7 +9,6 @@ container image). Configure the target with environment variables:
                                 then "test-token")
 
 The suite assumes the server is configured with:
-    SITES=site1,site2,site3
     SITE_PREFIXES=site1:192,site2:193,site3:194
     API_TOKEN=test-token   (or match SEGMENTS_MANAGER_API_TOKEN)
 """
@@ -80,18 +79,19 @@ def segment_factory():
     this factory unlocks them right after creation unless `keep_locked=True`
     is passed — most tests expect an immediately-allocatable segment.
     """
-    created_ids = []
+    created_cidrs = []
 
     def _create(**body):
         keep_locked = body.pop("keep_locked", False)
         body.setdefault("dhcp", False)
         r = requests.post(f"{API}/segments", json=body, headers=AUTH_HEADERS, timeout=TIMEOUT)
         if r.status_code == 200 and "id" in r.json():
-            sid = r.json()["id"]
-            created_ids.append(sid)
+            cidr = body["segment"]
+            created_cidrs.append(cidr)
             if not keep_locked:
                 requests.post(
-                    f"{API}/segments/{sid}/unlock",
+                    f"{API}/segments/unlock",
+                    json={"segment": cidr},
                     headers=AUTH_HEADERS,
                     timeout=TIMEOUT,
                 )
@@ -99,9 +99,10 @@ def segment_factory():
 
     yield _create
 
-    for sid in created_ids:
+    for cidr in created_cidrs:
         try:
-            requests.delete(f"{API}/segments/{sid}", headers=AUTH_HEADERS, timeout=TIMEOUT)
+            requests.delete(f"{API}/segments", params={"segment": cidr},
+                            headers=AUTH_HEADERS, timeout=TIMEOUT)
         except requests.RequestException:
             pass
 
