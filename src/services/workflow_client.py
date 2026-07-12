@@ -15,7 +15,7 @@ import logging
 import httpx
 
 from ..config.constants import WorkflowTrigger
-from ..config.settings import WORKFLOWS_API_URL
+from ..config.settings import CONNECTIVITY_WORKFLOW_API_URL
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +27,7 @@ async def trigger_connectivity_workflow(segment: str, segment_type: str) -> None
     @handle_db_errors and turn an already-successful segment creation into a
     500 response, which would be misleading to the caller.
     """
-    url = f"{WORKFLOWS_API_URL}/workflows/connectivity"
+    url = f"{CONNECTIVITY_WORKFLOW_API_URL}/workflows/connectivity"
     try:
         async with httpx.AsyncClient(timeout=WorkflowTrigger.TIMEOUT_SECONDS) as client:
             response = await client.post(url, json={"segment": segment, "type": segment_type})
