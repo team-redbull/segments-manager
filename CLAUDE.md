@@ -188,6 +188,9 @@ Collection: **`segments`**
     "connectivity_requests": list[int] | None,  # pending firewall request ids shown in the UI beside status;
                                                 # set/cleared by the connectivity orchestrator
                                                 # (PUT /api/segments/connectivity-requests; empty list clears)
+    "connectivity_requests_submitted_at": datetime | None,  # when the pending ids were submitted;
+                                                # drives the "time since submit" header in the UI popover;
+                                                # cleared together with connectivity_requests
 }
 ```
 
@@ -195,7 +198,7 @@ Collection: **`segments`**
 
 > **Locked is the default status for new segments.** Lifecycle is one-way: `Locked → Available → Allocated → Available` — a segment can never become locked again via the API (no re-lock endpoint exists). It signals that firewall rules haven't been opened yet. `allocate_segment()` only considers segments with `status: "Available"`. An external service unlocks a segment via `POST /api/segments/unlock` with body `{"segment": "<cidr>"}` once provisioning is done.
 
-> **Pending connectivity request ids.** While waiting for firewall approval, the connectivity orchestrator mirrors its still-pending request ids onto the segment via `PUT /api/segments/connectivity-requests` (body `{"segment", "request_ids"}`; replace semantics, idempotent, empty list clears — stored as `None`). The UI renders a **Requests ID** button beside the status badge whenever the list is non-empty; clicking it opens a popover anchored to the button listing the ids. The display disappears automatically once the orchestrator sends the final empty update (all requests complete).
+> **Pending connectivity request ids.** While waiting for firewall approval, the connectivity orchestrator mirrors its still-pending request ids onto the segment via `PUT /api/segments/connectivity-requests` (body `{"segment", "request_ids", "submitted_at"}`; `submitted_at` is optional, replace semantics, idempotent, empty list clears both fields — stored as `None`). The UI renders a **Requests ID** button beside the status badge whenever the list is non-empty; clicking it opens a popover anchored to the button. The popover header shows elapsed time since `submitted_at` ("Submitted N minutes ago", escalating to hours then days), followed by the pending ids. The display disappears automatically once the orchestrator sends the final empty update (all requests complete).
 
 **Indexes** (created in `init_storage()`):
 - `unique({site: 1, vlan_id: 1})` — one VLAN ID per site

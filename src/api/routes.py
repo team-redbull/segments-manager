@@ -99,7 +99,9 @@ async def set_segment_connectivity_requests(
     approval. An empty list clears the display (all requests completed).
     Idempotent.
     """
-    return await SegmentService.set_connectivity_requests(request.segment, request.request_ids)
+    return await SegmentService.set_connectivity_requests(
+        request.segment, request.request_ids, request.submitted_at
+    )
 
 
 @router.post("/segments/unlock")

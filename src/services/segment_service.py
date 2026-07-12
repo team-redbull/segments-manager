@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime
 from typing import Optional, List, Dict, Any
 from fastapi import HTTPException
 
@@ -200,22 +201,33 @@ class SegmentService:
     @handle_db_errors
     @retry_on_network_error(max_retries=3)
     @log_operation_timing("set_connectivity_requests", threshold_ms=2000)
-    async def set_connectivity_requests(segment_value: str, request_ids: List[int]) -> Dict[str, str]:
+    async def set_connectivity_requests(
+        segment_value: str, request_ids: List[int], submitted_at: Optional[datetime] = None
+    ) -> Dict[str, str]:
         """Replace the pending connectivity request ids displayed for a segment.
 
         Set by the connectivity orchestrator while its firewall (open-rules)
         requests await approval; the UI shows the ids beside the segment's
-        status. An empty list clears the display (all requests completed).
+        status, with `submitted_at` driving the "time since submit" header in
+        the popover. An empty list clears the display (all requests completed).
         Idempotent: setting the current value is a no-op.
         """
         existing_segment = await SegmentService._get_segment_or_404(segment_value)
 
         new_value = request_ids or None
-        if existing_segment.get("connectivity_requests") == new_value:
+        new_submitted_at = submitted_at if new_value else None
+        if (
+            existing_segment.get("connectivity_requests") == new_value
+            and existing_segment.get("connectivity_requests_submitted_at") == new_submitted_at
+        ):
             return {"message": "Segment already up to date"}
 
         success = await DatabaseUtils.update_segment_by_id(
-            str(existing_segment["_id"]), {"connectivity_requests": new_value}
+            str(existing_segment["_id"]),
+            {
+                "connectivity_requests": new_value,
+                "connectivity_requests_submitted_at": new_submitted_at,
+            },
         )
         if not success:
             raise HTTPException(status_code=500, detail="Failed to update segment")

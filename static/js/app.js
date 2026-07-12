@@ -703,18 +703,41 @@ function closeReqIdsPopover() {
     }
 }
 
+// Formats the time since a request was submitted, escalating the unit as it
+// grows (minutes -> hours -> days) so the header stays readable no matter how
+// long firewall approval takes (can be minutes, hours, or days).
+function formatElapsedSince(date) {
+    const ms = Date.now() - date.getTime();
+    if (!Number.isFinite(ms) || ms < 0) return null;
+    const minutes = Math.floor(ms / 60000);
+    if (minutes < 1) return "Submitted just now";
+    if (minutes < 60) return `Submitted ${minutes} minute${minutes === 1 ? "" : "s"} ago`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `Submitted ${hours} hour${hours === 1 ? "" : "s"} ago`;
+    const days = Math.floor(hours / 24);
+    return `Submitted ${days} day${days === 1 ? "" : "s"} ago`;
+}
+
 function openReqIdsPopover(btn) {
     closeReqIdsPopover();
     let ids = [];
     try {
         ids = JSON.parse(btn.getAttribute("data-request-ids")) || [];
     } catch (e) {}
+    const submittedAtRaw = btn.getAttribute("data-submitted-at");
+    const submittedAt = submittedAtRaw ? new Date(submittedAtRaw) : null;
+    const elapsedLabel =
+        submittedAt && !Number.isNaN(submittedAt.getTime()) ? formatElapsedSince(submittedAt) : null;
     const popover = document.createElement("div");
     popover.id = "reqIdsPopover";
     popover.className = "req-ids-popover";
     popover.setAttribute("role", "dialog");
     popover.setAttribute("aria-label", "Pending connectivity request IDs");
-    popover.innerHTML = ids.map((id) => `<div class="req-ids-popover__id">${escapeHTML(id)}</div>`).join("");
+    const header = elapsedLabel
+        ? `<div class="req-ids-popover__title">${escapeHTML(elapsedLabel)}</div>`
+        : "";
+    popover.innerHTML =
+        header + ids.map((id) => `<div class="req-ids-popover__id">${escapeHTML(id)}</div>`).join("");
     document.body.appendChild(popover);
     // Anchor just below the button, clamped to the viewport (position: fixed).
     const rect = btn.getBoundingClientRect();
@@ -832,7 +855,7 @@ async function loadSegments(showSkeleton = false) {
                     ? segment.connectivity_requests
                     : [];
                 const reqIdsBtn = reqIds.length
-                    ? `<button type="button" class="req-ids-btn" aria-haspopup="dialog" aria-expanded="false" data-request-ids="${escapeHTML(JSON.stringify(reqIds))}">Request IDs</button>`
+                    ? `<button type="button" class="req-ids-btn" aria-haspopup="dialog" aria-expanded="false" data-request-ids="${escapeHTML(JSON.stringify(reqIds))}" data-submitted-at="${escapeHTML(segment.connectivity_requests_submitted_at || "")}">Request IDs</button>`
                     : "";
                 return `
                 <tr>

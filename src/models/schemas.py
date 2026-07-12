@@ -99,6 +99,7 @@ class SegmentConnectivityRequestsUpdate(BaseModel):
     """
     segment: str = Field(..., description="Network segment in CIDR notation (unique per segment)", examples=["192.168.1.0/24"])
     request_ids: List[int] = Field(..., description="Pending connectivity request ids; an empty list clears the display", examples=[[123456, 654321]])
+    submitted_at: Optional[datetime] = Field(default=None, description="When these requests were originally submitted; drives the \"time since submit\" header in the UI popover. Ignored/cleared when request_ids is empty.", examples=["2024-01-15T10:30:00Z"])
 
     model_config = {
         "extra": "forbid",
@@ -106,7 +107,8 @@ class SegmentConnectivityRequestsUpdate(BaseModel):
             "examples": [
                 {
                     "segment": "192.168.1.0/24",
-                    "request_ids": [123456, 654321]
+                    "request_ids": [123456, 654321],
+                    "submitted_at": "2024-01-15T10:30:00Z"
                 }
             ]
         }
