@@ -369,6 +369,8 @@ const ICONS = {
         '<svg viewBox="0 0 24 24" class="icon icon-sm toast__icon"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>',
     copy:
         '<svg viewBox="0 0 24 24" class="icon icon-sm copyable__icon" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>',
+    alertCircle:
+        '<svg viewBox="0 0 24 24" class="icon icon-sm" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>',
 };
 
 // ---- Copy to clipboard ------------------------------------------------------
@@ -703,6 +705,16 @@ function closeReqIdsPopover() {
     }
 }
 
+// Parses a server timestamp, defaulting to UTC when it carries no timezone.
+// `new Date("2026-07-13T10:00:00")` (no 'Z'/offset) is read as LOCAL time by the
+// browser, which would skew "Submitted N ago" by the viewer's UTC offset. Our
+// timestamps are always UTC, so treat an offset-less string as UTC.
+function parseTimestampUTC(raw) {
+    if (!raw) return null;
+    const hasTZ = /[zZ]|[+-]\d{2}:?\d{2}$/.test(raw);
+    return new Date(hasTZ ? raw : raw + "Z");
+}
+
 // Formats the time since a request was submitted, escalating the unit as it
 // grows (minutes -> hours -> days) so the header stays readable no matter how
 // long firewall approval takes (can be minutes, hours, or days).
@@ -725,7 +737,7 @@ function openReqIdsPopover(btn) {
         ids = JSON.parse(btn.getAttribute("data-request-ids")) || [];
     } catch (e) {}
     const submittedAtRaw = btn.getAttribute("data-submitted-at");
-    const submittedAt = submittedAtRaw ? new Date(submittedAtRaw) : null;
+    const submittedAt = parseTimestampUTC(submittedAtRaw);
     const elapsedLabel =
         submittedAt && !Number.isNaN(submittedAt.getTime()) ? formatElapsedSince(submittedAt) : null;
     const popover = document.createElement("div");
@@ -745,6 +757,126 @@ function openReqIdsPopover(btn) {
     popover.style.left = Math.min(rect.left, window.innerWidth - popover.offsetWidth - 8) + "px";
     btn.setAttribute("aria-expanded", "true");
     reqIdsAnchor = btn;
+}
+
+// ---- Pending connectivity requests alert (floating "!" button) -------------
+// Surfaces connectivity requests that were submitted to the next (firewall)
+// service but are still not handled after 24h. It's an exception state (normal
+// approval is far quicker), so nothing shows until the threshold is crossed —
+// then a single floating button appears with the unhandled request ids grouped
+// by submission time. Independent of the table's status/site/search filters.
+const PENDING_ALERT_THRESHOLD_MS = 24 * 60 * 60 * 1000; // 24h
+let pendingPopoverOpen = false;
+
+// Compact elapsed label for the group header: hours until 2 days, then days.
+function formatElapsedCompact(ms) {
+    const hours = Math.floor(ms / 3600000);
+    if (hours < 48) return `${hours}h`;
+    return `${Math.floor(hours / 24)}d`;
+}
+
+// One overdue segment -> one group { elapsedMs, ids }. Sorted most-overdue first.
+function computePendingOverdue(segments) {
+    if (!Array.isArray(segments)) return [];
+    const now = Date.now();
+    const groups = [];
+    for (const seg of segments) {
+        const ids = Array.isArray(seg.connectivity_requests) ? seg.connectivity_requests : [];
+        if (!ids.length) continue;
+        const submittedAt = parseTimestampUTC(seg.connectivity_requests_submitted_at);
+        if (!submittedAt || Number.isNaN(submittedAt.getTime())) continue;
+        const elapsedMs = now - submittedAt.getTime();
+        if (elapsedMs < PENDING_ALERT_THRESHOLD_MS) continue;
+        groups.push({ elapsedMs, ids });
+    }
+    groups.sort((a, b) => b.elapsedMs - a.elapsedMs);
+    return groups;
+}
+
+function pendingGroupHTML(group) {
+    const count = group.ids.length;
+    const chips = group.ids
+        .map((id) => `<span class="pending-chip">${escapeHTML(id)}</span>`)
+        .join("");
+    return `
+        <div class="pending-group">
+            <div class="pending-group__head">
+                <span class="pending-group__time">${escapeHTML(formatElapsedCompact(group.elapsedMs))}</span>
+                <span class="pending-group__meta">${count} request${count === 1 ? "" : "s"}</span>
+            </div>
+            <div class="pending-group__chips">${chips}</div>
+        </div>`;
+}
+
+function setPendingPopoverOpen(open) {
+    pendingPopoverOpen = open;
+    const pop = document.getElementById("pendingPopover");
+    const fab = document.getElementById("pendingFab");
+    if (pop) pop.hidden = !open;
+    if (fab) fab.setAttribute("aria-expanded", open ? "true" : "false");
+}
+
+// Renders (or updates in place) the floating button + popover. Updating in
+// place instead of rebuilding keeps content live across the 30s refresh without
+// replaying the open animation or collapsing an open popover; the entrance
+// animation then only plays when the popover actually transitions to visible.
+// The open/closed state is preserved via the module-level pendingPopoverOpen.
+function renderPendingRequests(groups) {
+    let popover = document.getElementById("pendingPopover");
+    let fab = document.getElementById("pendingFab");
+
+    if (!groups.length) {
+        if (popover) popover.remove();
+        if (fab) fab.remove();
+        pendingPopoverOpen = false;
+        return;
+    }
+
+    const total = groups.reduce((n, g) => n + g.ids.length, 0);
+    const badge = total > 99 ? "99+" : String(total);
+    const label = `${total} pending connectivity request${total === 1 ? "" : "s"} over 24h`;
+
+    if (!popover) {
+        popover = document.createElement("div");
+        popover.id = "pendingPopover";
+        popover.className = "pending-popover";
+        popover.setAttribute("role", "dialog");
+        popover.hidden = !pendingPopoverOpen;
+        document.body.appendChild(popover);
+    }
+    popover.setAttribute("aria-label", label);
+    popover.innerHTML =
+        `<div class="pending-popover__head">` +
+        ICONS.alertCircle +
+        `<span class="pending-popover__title">Pending Requests</span>` +
+        `<span class="pending-popover__badge">24h+</span>` +
+        `</div>` +
+        `<div class="pending-popover__list">${groups.map(pendingGroupHTML).join("")}</div>`;
+
+    if (!fab) {
+        fab = document.createElement("button");
+        fab.type = "button";
+        fab.id = "pendingFab";
+        fab.className = "pending-fab";
+        fab.setAttribute("aria-haspopup", "dialog");
+        fab.setAttribute("aria-controls", "pendingPopover");
+        document.body.appendChild(fab);
+    }
+    fab.setAttribute("aria-expanded", pendingPopoverOpen ? "true" : "false");
+    fab.setAttribute("aria-label", label);
+    fab.setAttribute("title", label);
+    fab.innerHTML = `!<span class="pending-fab__count">${escapeHTML(badge)}</span>`;
+}
+
+// Fetches ALL segments (unfiltered, so the alert is independent of the table's
+// current filters) and refreshes the floating alert. Failures are non-fatal.
+async function refreshPendingRequests() {
+    try {
+        const segments = await fetchAPI("/segments");
+        renderPendingRequests(computePendingOverdue(segments));
+    } catch (e) {
+        // Non-critical: leave whatever is currently displayed.
+    }
 }
 
 // ---- Column sorting ----------------------------------------------------------
@@ -1032,11 +1164,18 @@ document.addEventListener("DOMContentLoaded", function () {
         ) {
             closeReqIdsPopover();
         }
+        // Floating pending-requests alert: toggle on its button, close on outside click.
+        if (e.target.closest(".pending-fab")) {
+            setPendingPopoverOpen(!pendingPopoverOpen);
+        } else if (pendingPopoverOpen && !e.target.closest(".pending-popover")) {
+            setPendingPopoverOpen(false);
+        }
     });
     document.addEventListener("keydown", (e) => {
         if (e.key === "Escape") {
             closeFilterPopover();
             closeReqIdsPopover();
+            setPendingPopoverOpen(false);
             columnsPopover.hidden = true;
             columnsBtn.setAttribute("aria-expanded", "false");
         }
@@ -1066,6 +1205,7 @@ document.addEventListener("DOMContentLoaded", function () {
     (async function init() {
         await loadSites();
         await Promise.all([loadStats(true), loadSegments(true)]);
+        refreshPendingRequests();
     })().catch(() => {
         showError("Failed to load initial data. Please refresh the page.");
     });
@@ -1075,6 +1215,7 @@ document.addEventListener("DOMContentLoaded", function () {
         if (isOnline) {
             loadStats(false);
             loadSegments(false);
+            refreshPendingRequests();
         }
     }, 30000);
 

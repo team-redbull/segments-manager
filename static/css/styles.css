@@ -1088,6 +1088,179 @@ td.copyable:focus-visible .copyable__icon {
     padding: 2px 0;
 }
 
+/* ---- Pending connectivity requests alert (floating) -----------------------
+   A single floating "!" button pinned bottom-right, present ONLY when one or
+   more segments still have connectivity requests pending past the 24h
+   threshold. Clicking it opens a popover that groups the unhandled request ids
+   by submission time. Fixed-position, so it never changes the page height. */
+.pending-fab {
+    position: fixed;
+    right: var(--space-5);
+    bottom: var(--space-5);
+    z-index: var(--z-toast);
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    border: none;
+    cursor: pointer;
+    background: linear-gradient(135deg, #f59e0b, var(--warn-500));
+    color: #1a1206;
+    font-family: var(--font-sans);
+    font-weight: 900;
+    font-size: 30px;
+    line-height: 1;
+    display: grid;
+    place-items: center;
+    box-shadow: 0 8px 24px rgba(217, 119, 6, 0.45), var(--shadow-md);
+    transition: transform var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
+}
+.pending-fab:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 12px 30px rgba(217, 119, 6, 0.55), var(--shadow-lg);
+}
+.pending-fab:focus-visible {
+    outline: 2px solid var(--warn-text);
+    outline-offset: 3px;
+}
+.pending-fab::after {
+    /* soft attention pulse */
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.5);
+    animation: pending-pulse 2s var(--ease) infinite;
+}
+@keyframes pending-pulse {
+    0% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.5); }
+    70% { box-shadow: 0 0 0 14px rgba(245, 158, 11, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }
+}
+@media (prefers-reduced-motion: reduce) {
+    .pending-fab::after { animation: none; }
+}
+.pending-fab__count {
+    position: absolute;
+    top: -4px;
+    right: -4px;
+    min-width: 20px;
+    height: 20px;
+    padding: 0 5px;
+    border-radius: var(--radius-pill);
+    background: var(--danger-500);
+    color: #fff;
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 0.7rem;
+    font-weight: 700;
+    display: grid;
+    place-items: center;
+    border: 2px solid var(--bg);
+}
+
+.pending-popover {
+    position: fixed;
+    right: var(--space-5);
+    bottom: calc(var(--space-5) + 68px);
+    z-index: var(--z-toast);
+    width: min(320px, calc(100vw - 48px));
+    background: var(--surface-2);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-lg);
+    overflow: hidden;
+    transform-origin: bottom right;
+    animation: pending-pop-in 140ms var(--ease);
+}
+.pending-popover[hidden] { display: none; }
+@keyframes pending-pop-in {
+    from { opacity: 0; transform: translateY(6px) scale(0.97); }
+    to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .pending-popover { animation: none; }
+}
+.pending-popover__head {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-3) var(--space-4);
+    border-bottom: 1px solid var(--border);
+}
+.pending-popover__head .icon { color: var(--warn-text); }
+.pending-popover__title { font-size: 0.82rem; font-weight: 700; color: var(--text); }
+.pending-popover__badge {
+    margin-left: auto;
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    font-weight: 700;
+    color: var(--warn-text);
+    background: var(--warn-bg);
+    padding: 2px 8px;
+    border-radius: var(--radius-pill);
+}
+
+.pending-popover__list { max-height: min(60vh, 380px); overflow-y: auto; }
+
+/* one group = one batch of requests sharing a submission time */
+.pending-group { border-bottom: 1px solid var(--border); }
+.pending-group:last-child { border-bottom: none; }
+.pending-group__head {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-3) var(--space-4) var(--space-2);
+    position: sticky;
+    top: 0;
+    background: var(--surface-2);
+}
+.pending-group__time {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 0.74rem;
+    font-weight: 700;
+    padding: 3px 9px 3px 8px;
+    border-radius: var(--radius-pill);
+    background: var(--warn-bg);
+    color: var(--warn-text);
+    white-space: nowrap;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+.pending-group__time::before {
+    content: "";
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+}
+.pending-group__meta {
+    font-size: 0.68rem;
+    color: var(--text-faint);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-left: auto;
+}
+.pending-group__chips {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(56px, 1fr));
+    gap: 5px;
+    padding: 0 var(--space-4) var(--space-3);
+}
+.pending-chip {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 0.76rem;
+    font-weight: 700;
+    color: var(--text);
+    text-align: center;
+    padding: 3px 4px;
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    border: 1px solid var(--border);
+}
+
 /* Empty / error states */
 .state-cell {
     padding: var(--space-7) var(--space-5) !important;
