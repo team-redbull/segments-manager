@@ -354,64 +354,66 @@ svg {
 .stat-card__site .icon {
     color: var(--primary);
 }
-.stat-card__util {
-    font-family: var(--font-mono);
-    font-variant-numeric: tabular-nums;
-    font-size: 0.78rem;
-    font-weight: 700;
-    padding: 3px 8px;
-    border-radius: var(--radius-pill);
-    background: var(--accent-soft);
-    color: var(--primary);
-}
-
-.stat-card__metrics {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: var(--space-2);
-    margin-bottom: var(--space-4);
-}
-.metric {
+/* ---- Per-type usage (site cards) ------------------------------------------ */
+.types {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: var(--space-3);
 }
-.metric__value {
-    font-family: var(--font-mono);
-    font-variant-numeric: tabular-nums;
-    font-size: 1.35rem;
+.trow {
+    display: grid;
+    grid-template-columns: 92px 1fr auto;
+    align-items: center;
+    gap: var(--space-3);
+}
+.tname {
+    font-size: 0.74rem;
     font-weight: 700;
-    line-height: 1.1;
-    letter-spacing: -0.02em;
-}
-.metric__value.is-ok {
-    color: var(--ok-text);
-}
-.metric__value.is-zero {
-    color: var(--danger-text);
-}
-.metric__label {
-    font-size: 0.72rem;
-    color: var(--text-muted);
-    font-weight: 500;
     text-transform: uppercase;
-    letter-spacing: 0.03em;
+    letter-spacing: 0.04em;
+    color: var(--text-muted);
 }
-
-.progress {
-    height: 8px;
+.tbar {
+    height: 7px;
     background: var(--track);
     border-radius: var(--radius-pill);
     overflow: hidden;
 }
-.progress__fill {
+.tbar__fill {
     height: 100%;
     border-radius: inherit;
     background: linear-gradient(90deg, var(--brand-500), var(--brand-700));
     transition: width 500ms var(--ease);
 }
-.progress__fill.is-high {
+.tbar__fill.is-high {
     background: linear-gradient(90deg, var(--warn-500), var(--danger-500));
+}
+.tbar__fill.is-empty {
+    background: transparent;
+}
+.tcount {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 0.85rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    min-width: 52px;
+    text-align: right;
+}
+.tcount .den {
+    color: var(--text-faint);
+    font-weight: 500;
+}
+.tcount.is-full {
+    color: var(--danger-text);
+}
+.tcount.is-idle {
+    color: var(--text-faint);
+}
+.types-empty {
+    font-size: 0.82rem;
+    color: var(--text-faint);
+    padding: var(--space-2) 0;
 }
 
 /* ---- Segments panel ------------------------------------------------------- */
@@ -1658,9 +1660,6 @@ td.copyable:focus-visible .copyable__icon {
     }
     .select {
         flex: 1;
-    }
-    .stat-card__metrics {
-        gap: var(--space-1);
     }
     .toast-region {
         left: var(--space-3);

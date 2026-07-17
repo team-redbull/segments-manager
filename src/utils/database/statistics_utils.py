@@ -11,6 +11,10 @@ from ...config.settings import SITES
 
 logger = logging.getLogger(__name__)
 
+# Segment types surfaced in the per-site usage breakdown, in display order.
+# PXE is intentionally excluded from this view.
+DISPLAY_TYPES = ["HC", "MCE", "INVENTORY"]
+
 
 class StatisticsUtils:
     """Statistics and aggregation for segments"""
@@ -64,13 +68,26 @@ class StatisticsUtils:
             available = sum(1 for s in site_segments if s.get("status") == STATUS_AVAILABLE)
             locked = sum(1 for s in site_segments if s.get("status") == STATUS_LOCKED)
 
+            # Per-type usage: allocated out of total for each displayed type.
+            by_type = []
+            for seg_type in DISPLAY_TYPES:
+                type_segments = [s for s in site_segments if s.get("type") == seg_type]
+                type_total = len(type_segments)
+                type_allocated = sum(1 for s in type_segments if s.get("status") == STATUS_ALLOCATED)
+                by_type.append({
+                    "type": seg_type,
+                    "allocated": type_allocated,
+                    "total": type_total,
+                })
+
             stats.append({
                 "site": site,
                 "total_segments": total_segments,
                 "allocated": allocated,
                 "available": available,
                 "locked": locked,
-                "utilization": round((allocated / total_segments * 100) if total_segments > 0 else 0, 1)
+                "utilization": round((allocated / total_segments * 100) if total_segments > 0 else 0, 1),
+                "by_type": by_type
             })
 
         return stats

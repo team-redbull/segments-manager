@@ -568,19 +568,50 @@ async function loadSites() {
 
 // ---- Stats -----------------------------------------------------------------
 function statSkeleton() {
+    const row = `
+        <div class="trow">
+            <span class="skeleton" style="height:12px"></span>
+            <span class="skeleton" style="height:7px;border-radius:999px"></span>
+            <span class="skeleton" style="width:48px;height:12px"></span>
+        </div>`;
     return `
         <div class="stat-card">
             <div class="stat-card__head">
                 <span class="skeleton" style="width:90px;height:16px"></span>
-                <span class="skeleton" style="width:48px;height:20px;border-radius:999px"></span>
             </div>
-            <div class="stat-card__metrics">
-                <span class="skeleton" style="height:34px"></span>
-                <span class="skeleton" style="height:34px"></span>
-                <span class="skeleton" style="height:34px"></span>
-            </div>
-            <span class="skeleton" style="height:8px;border-radius:999px"></span>
+            <div class="types">${row.repeat(3)}</div>
         </div>`;
+}
+
+// Renders the per-type usage rows for one site: allocated out of total per type.
+function renderTypeUsage(stat) {
+    const types = (stat.by_type || []).filter((t) => Number(t.total) > 0);
+    if (types.length === 0) {
+        return '<div class="types-empty">No HC / MCE / INVENTORY segments</div>';
+    }
+    const rows = types
+        .map((t) => {
+            const allocated = Number(t.allocated) || 0;
+            const total = Number(t.total) || 0;
+            const pct = total > 0 ? Math.round((allocated / total) * 100) : 0;
+            const full = total > 0 && allocated >= total;
+            const idle = allocated === 0;
+            const high = pct >= 85;
+            const fillClass = high ? "is-high" : idle ? "is-empty" : "";
+            const countClass = full ? "is-full" : idle ? "is-idle" : "";
+            return `
+                <div class="trow">
+                    <span class="tname">${escapeHTML(t.type)}</span>
+                    <div class="tbar" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100" aria-label="${escapeHTML(
+                t.type
+            )} usage">
+                        <div class="tbar__fill ${fillClass}" style="width:${pct}%"></div>
+                    </div>
+                    <span class="tcount ${countClass}">${allocated}<span class="den">/${total}</span></span>
+                </div>`;
+        })
+        .join("");
+    return `<div class="types">${rows}</div>`;
 }
 
 async function loadStats(showSkeleton = false) {
@@ -603,43 +634,14 @@ async function loadStats(showSkeleton = false) {
 
         container.innerHTML = stats
             .map((stat) => {
-                const util = Number(stat.utilization) || 0;
-                const availableZero = Number(stat.available) === 0;
                 return `
                 <article class="stat-card">
                     <div class="stat-card__head">
                         <div class="stat-card__site">${ICONS.server}<span>${escapeHTML(
                     stat.site
                 )}</span></div>
-                        <span class="stat-card__util">${util}%</span>
                     </div>
-                    <div class="stat-card__metrics">
-                        <div class="metric">
-                            <span class="metric__value">${escapeHTML(
-                                stat.total_segments
-                            )}</span>
-                            <span class="metric__label">Total</span>
-                        </div>
-                        <div class="metric">
-                            <span class="metric__value">${escapeHTML(
-                                stat.allocated
-                            )}</span>
-                            <span class="metric__label">Allocated</span>
-                        </div>
-                        <div class="metric">
-                            <span class="metric__value ${
-                                availableZero ? "is-zero" : "is-ok"
-                            }">${escapeHTML(stat.available)}</span>
-                            <span class="metric__label">Available</span>
-                        </div>
-                    </div>
-                    <div class="progress" role="progressbar" aria-valuenow="${util}" aria-valuemin="0" aria-valuemax="100" aria-label="${escapeHTML(
-                    stat.site
-                )} utilization">
-                        <div class="progress__fill ${
-                            util >= 85 ? "is-high" : ""
-                        }" style="width:${util}%"></div>
-                    </div>
+                    ${renderTypeUsage(stat)}
                 </article>`;
             })
             .join("");
