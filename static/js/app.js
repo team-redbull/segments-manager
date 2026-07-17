@@ -583,6 +583,12 @@ function statSkeleton() {
         </div>`;
 }
 
+// Maps a segment type to its accent class, which sets --type-c in CSS
+// (used by the table type badge and the sites-summary rows).
+function typeClass(type) {
+    return type ? "type-" + String(type).toLowerCase() : "";
+}
+
 // Renders the per-type usage rows for one site: allocated out of total per type.
 function renderTypeUsage(stat) {
     const types = (stat.by_type || []).filter((t) => Number(t.total) > 0);
@@ -600,7 +606,7 @@ function renderTypeUsage(stat) {
             const fillClass = high ? "is-high" : idle ? "is-empty" : "";
             const countClass = full ? "is-full" : idle ? "is-idle" : "";
             return `
-                <div class="trow">
+                <div class="trow ${typeClass(t.type)}">
                     <span class="tname">${escapeHTML(t.type)}</span>
                     <div class="tbar" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100" aria-label="${escapeHTML(
                 t.type
@@ -995,7 +1001,7 @@ async function loadSegments(showSkeleton = false) {
                 <tr>
                     <td data-col="type">${
                         segment.type
-                            ? `<span class="badge-type">${escapeHTML(segment.type)}</span>`
+                            ? `<span class="badge-type ${typeClass(segment.type)}">${escapeHTML(segment.type)}</span>`
                             : '<span class="cell-muted">—</span>'
                     }</td>
                     <td data-col="site"><span class="site-chip">${escapeHTML(segment.site)}</span></td>

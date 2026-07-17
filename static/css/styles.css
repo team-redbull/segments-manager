@@ -88,6 +88,13 @@
     --danger-bg: rgba(220, 38, 38, 0.18);
     --danger-text: #f87171;
 
+    /* Segment-type accents — kept clear of the blue UI theme and of the
+       status colors above (green/amber/red) so type never reads as status. */
+    --type-hc: #2dd4bf;
+    --type-mce: #a78bfa;
+    --type-inventory: #f472b6;
+    --type-pxe: #a3e635;
+
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
     --shadow-md: 0 6px 18px rgba(0, 0, 0, 0.4);
     --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.5);
@@ -371,7 +378,7 @@ svg {
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.04em;
-    color: var(--text-muted);
+    color: var(--type-c, var(--text-muted));
 }
 .tbar {
     height: 7px;
@@ -382,7 +389,7 @@ svg {
 .tbar__fill {
     height: 100%;
     border-radius: inherit;
-    background: linear-gradient(90deg, var(--brand-500), var(--brand-700));
+    background: var(--type-c, var(--brand-500));
     transition: width 500ms var(--ease);
 }
 .tbar__fill.is-high {
@@ -1006,10 +1013,17 @@ td.copyable:focus-visible .copyable__icon {
     font-size: 0.72rem;
     font-weight: 700;
     letter-spacing: 0.02em;
-    background: var(--accent-soft);
-    color: var(--primary);
+    background: color-mix(in srgb, var(--type-c, var(--primary)) 15%, transparent);
+    color: var(--type-c, var(--primary));
     font-family: var(--font-mono);
 }
+
+/* Per-type accent, shared by the table badge and the sites-summary rows.
+   Falls back to the blue --primary for any unrecognized type. */
+.type-hc { --type-c: var(--type-hc); }
+.type-mce { --type-c: var(--type-mce); }
+.type-inventory { --type-c: var(--type-inventory); }
+.type-pxe { --type-c: var(--type-pxe); }
 
 /* Pending connectivity request ids (button in the status cell + its popover).
    Styled as a transient, "live" indicator — a ghost pill with a dashed border
