@@ -24,8 +24,14 @@ class StatsService:
     @retry_on_network_error(max_retries=3)
     @log_operation_timing("get_stats", threshold_ms=1000)
     async def get_stats() -> List[Dict[str, Any]]:
-        """Get statistics per site — single query for all sites."""
-        return await StatisticsUtils.get_all_sites_statistics()
+        """Per-site usage for the UI: site name + per-type breakdown only.
+
+        The site cards render only the per-type usage, so the response is
+        trimmed to {site, by_type}. Site-level totals/utilization are still
+        computed by get_all_sites_statistics() for the health check.
+        """
+        all_stats = await StatisticsUtils.get_all_sites_statistics()
+        return [{"site": s["site"], "by_type": s["by_type"]} for s in all_stats]
 
     @staticmethod
     @handle_db_errors
