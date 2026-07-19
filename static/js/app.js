@@ -371,6 +371,8 @@ const ICONS = {
         '<svg viewBox="0 0 24 24" class="icon icon-sm copyable__icon" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>',
     alertCircle:
         '<svg viewBox="0 0 24 24" class="icon icon-sm" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>',
+    alertTriangle:
+        '<svg viewBox="0 0 24 24" class="icon icon-sm" aria-hidden="true"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
 };
 
 // ---- Copy to clipboard ------------------------------------------------------
@@ -698,8 +700,8 @@ function updateSegmentCount(n) {
     if (el) el.textContent = n + (n === 1 ? " segment" : " segments");
 }
 
-// ---- Connectivity request-ids popover ---------------------------------------
-// While the connectivity orchestrator has firewall requests awaiting approval
+// ---- Segment-connectivity request-ids popover ---------------------------------------
+// While the segment-connectivity orchestrator has firewall requests awaiting approval
 // for a segment, the row's status cell shows a "Requests ID" button; clicking
 // it opens a small popover (anchored to the button) listing the pending ids.
 let reqIdsAnchor = null;
@@ -752,7 +754,7 @@ function openReqIdsPopover(btn) {
     popover.id = "reqIdsPopover";
     popover.className = "req-ids-popover";
     popover.setAttribute("role", "dialog");
-    popover.setAttribute("aria-label", "Pending connectivity request IDs");
+    popover.setAttribute("aria-label", "Pending segment-connectivity request IDs");
     const header = elapsedLabel
         ? `<div class="req-ids-popover__title">${escapeHTML(elapsedLabel)}</div>`
         : "";
@@ -767,12 +769,57 @@ function openReqIdsPopover(btn) {
     reqIdsAnchor = btn;
 }
 
-// ---- Pending connectivity requests alert (floating "!" button) -------------
-// Surfaces connectivity requests that were submitted to the next (firewall)
-// service but are still not handled after 24h. It's an exception state (normal
-// approval is far quicker), so nothing shows until the threshold is crossed —
-// then a single floating button appears with the unhandled request ids grouped
-// by submission time. Independent of the table's status/site/search filters.
+// ---- Segment-connectivity failure popover -------------------------------------------
+// When the segment-connectivity orchestrator's workflow fails or is cancelled after
+// submission, the row's status cell shows a "Workflow failed" pill beside the
+// (still Locked) status badge; clicking it opens a popover with the failure
+// message and how long ago it failed.
+let connFailedAnchor = null;
+
+function closeConnFailedPopover() {
+    const popover = document.getElementById("connFailedPopover");
+    if (popover) popover.remove();
+    if (connFailedAnchor) {
+        connFailedAnchor.setAttribute("aria-expanded", "false");
+        connFailedAnchor = null;
+    }
+}
+
+function openConnFailedPopover(btn) {
+    closeConnFailedPopover();
+    const message = btn.getAttribute("data-failure") || "";
+    const failedAt = parseTimestampUTC(btn.getAttribute("data-failed-at"));
+    const elapsedLabel =
+        failedAt && !Number.isNaN(failedAt.getTime()) ? formatElapsedSince(failedAt) : null;
+    const popover = document.createElement("div");
+    popover.id = "connFailedPopover";
+    popover.className = "conn-failed-popover";
+    popover.setAttribute("role", "dialog");
+    popover.setAttribute("aria-label", "Segment-connectivity workflow failure");
+    const timeLabel = elapsedLabel ? elapsedLabel.replace(/^Submitted/, "Failed") : "Workflow failed";
+    popover.innerHTML =
+        `<div class="conn-failed-popover__head">${ICONS.alertTriangle}` +
+        `<span class="conn-failed-popover__title">Workflow failed</span>` +
+        `<span class="conn-failed-popover__time">${escapeHTML(timeLabel)}</span></div>` +
+        `<div class="conn-failed-popover__msg">${escapeHTML(message)}</div>`;
+    document.body.appendChild(popover);
+    // Anchor just below the button, clamped to the viewport (position: fixed).
+    const rect = btn.getBoundingClientRect();
+    popover.style.top = Math.min(rect.bottom + 6, window.innerHeight - popover.offsetHeight - 8) + "px";
+    popover.style.left = Math.min(rect.left, window.innerWidth - popover.offsetWidth - 8) + "px";
+    btn.setAttribute("aria-expanded", "true");
+    connFailedAnchor = btn;
+}
+
+// ---- Segment-connectivity attention alert (floating "!" button) --------------------
+// A single floating button surfaces two exception states that an operator
+// would otherwise have to hunt for in the table:
+//   1. Failed workflows — a segment-connectivity workflow that failed/was cancelled
+//      (the segment is stuck Locked). Always surfaced.
+//   2. Pending over 24h — requests submitted to the next (firewall) service but
+//      still unhandled after 24h (normal approval is far quicker).
+// The two are grouped separately in the popover. Independent of the table's
+// status/site/search filters.
 const PENDING_ALERT_THRESHOLD_MS = 24 * 60 * 60 * 1000; // 24h
 let pendingPopoverOpen = false;
 
@@ -789,9 +836,9 @@ function computePendingOverdue(segments) {
     const now = Date.now();
     const groups = [];
     for (const seg of segments) {
-        const ids = Array.isArray(seg.connectivity_requests) ? seg.connectivity_requests : [];
+        const ids = Array.isArray(seg.segment_connectivity_requests) ? seg.segment_connectivity_requests : [];
         if (!ids.length) continue;
-        const submittedAt = parseTimestampUTC(seg.connectivity_requests_submitted_at);
+        const submittedAt = parseTimestampUTC(seg.segment_connectivity_requests_submitted_at);
         if (!submittedAt || Number.isNaN(submittedAt.getTime())) continue;
         const elapsedMs = now - submittedAt.getTime();
         if (elapsedMs < PENDING_ALERT_THRESHOLD_MS) continue;
@@ -799,6 +846,24 @@ function computePendingOverdue(segments) {
     }
     groups.sort((a, b) => b.elapsedMs - a.elapsedMs);
     return groups;
+}
+
+// One failed segment -> one entry { segment, message, elapsedMs }. A failure is
+// always surfaced (no time threshold); most-recent first.
+function computeFailed(segments) {
+    if (!Array.isArray(segments)) return [];
+    const now = Date.now();
+    const items = [];
+    for (const seg of segments) {
+        const message = seg.segment_connectivity_failure;
+        if (!message) continue;
+        const failedAt = parseTimestampUTC(seg.segment_connectivity_failure_at);
+        const elapsedMs =
+            failedAt && !Number.isNaN(failedAt.getTime()) ? now - failedAt.getTime() : null;
+        items.push({ segment: seg.segment, message, elapsedMs });
+    }
+    items.sort((a, b) => (a.elapsedMs ?? Infinity) - (b.elapsedMs ?? Infinity));
+    return items;
 }
 
 function pendingGroupHTML(group) {
@@ -816,6 +881,18 @@ function pendingGroupHTML(group) {
         </div>`;
 }
 
+function failedGroupHTML(item) {
+    const when = item.elapsedMs != null ? formatElapsedCompact(item.elapsedMs) : "—";
+    return `
+        <div class="pending-group pending-group--failed">
+            <div class="pending-group__head">
+                <span class="pending-group__time pending-group__time--failed">${escapeHTML(when)}</span>
+                <span class="pending-group__meta">${escapeHTML(item.segment)}</span>
+            </div>
+            <div class="pending-group__msg">${escapeHTML(item.message)}</div>
+        </div>`;
+}
+
 function setPendingPopoverOpen(open) {
     pendingPopoverOpen = open;
     const pop = document.getElementById("pendingPopover");
@@ -829,20 +906,28 @@ function setPendingPopoverOpen(open) {
 // replaying the open animation or collapsing an open popover; the entrance
 // animation then only plays when the popover actually transitions to visible.
 // The open/closed state is preserved via the module-level pendingPopoverOpen.
-function renderPendingRequests(groups) {
+function renderAttentionAlert(overdue, failed) {
     let popover = document.getElementById("pendingPopover");
     let fab = document.getElementById("pendingFab");
 
-    if (!groups.length) {
+    if (!overdue.length && !failed.length) {
         if (popover) popover.remove();
         if (fab) fab.remove();
         pendingPopoverOpen = false;
         return;
     }
 
-    const total = groups.reduce((n, g) => n + g.ids.length, 0);
-    const badge = total > 99 ? "99+" : String(total);
-    const label = `${total} pending connectivity request${total === 1 ? "" : "s"} over 24h`;
+    const overdueTotal = overdue.reduce((n, g) => n + g.ids.length, 0);
+    // Badge counts attention items: one per failed segment + one per overdue id.
+    const count = failed.length + overdueTotal;
+    const badge = count > 99 ? "99+" : String(count);
+    const labelParts = [];
+    if (failed.length) labelParts.push(`${failed.length} failed workflow${failed.length === 1 ? "" : "s"}`);
+    if (overdueTotal) labelParts.push(`${overdueTotal} request${overdueTotal === 1 ? "" : "s"} pending over 24h`);
+    const label = labelParts.join(", ");
+    // A failure is more severe than a slow-but-pending request: flag the whole
+    // control as critical (red) whenever any failure is present.
+    const hasFailure = failed.length > 0;
 
     if (!popover) {
         popover = document.createElement("div");
@@ -853,23 +938,37 @@ function renderPendingRequests(groups) {
         document.body.appendChild(popover);
     }
     popover.setAttribute("aria-label", label);
-    popover.innerHTML =
-        `<div class="pending-popover__head">` +
-        ICONS.alertCircle +
-        `<span class="pending-popover__title">Pending Requests</span>` +
-        `<span class="pending-popover__badge">24h+</span>` +
-        `</div>` +
-        `<div class="pending-popover__list">${groups.map(pendingGroupHTML).join("")}</div>`;
+    const failedSection = failed.length
+        ? `<div class="pending-section pending-section--failed">` +
+          `<div class="pending-popover__head">` +
+          ICONS.alertTriangle +
+          `<span class="pending-popover__title">Failed Workflows</span>` +
+          `<span class="pending-popover__badge pending-popover__badge--failed">${failed.length}</span>` +
+          `</div>` +
+          `<div class="pending-popover__list">${failed.map(failedGroupHTML).join("")}</div>` +
+          `</div>`
+        : "";
+    const overdueSection = overdue.length
+        ? `<div class="pending-section">` +
+          `<div class="pending-popover__head">` +
+          ICONS.alertCircle +
+          `<span class="pending-popover__title">Pending Requests</span>` +
+          `<span class="pending-popover__badge">24h+</span>` +
+          `</div>` +
+          `<div class="pending-popover__list">${overdue.map(pendingGroupHTML).join("")}</div>` +
+          `</div>`
+        : "";
+    popover.innerHTML = failedSection + overdueSection;
 
     if (!fab) {
         fab = document.createElement("button");
         fab.type = "button";
         fab.id = "pendingFab";
-        fab.className = "pending-fab";
         fab.setAttribute("aria-haspopup", "dialog");
         fab.setAttribute("aria-controls", "pendingPopover");
         document.body.appendChild(fab);
     }
+    fab.className = hasFailure ? "pending-fab pending-fab--failed" : "pending-fab";
     fab.setAttribute("aria-expanded", pendingPopoverOpen ? "true" : "false");
     fab.setAttribute("aria-label", label);
     fab.setAttribute("title", label);
@@ -881,7 +980,7 @@ function renderPendingRequests(groups) {
 async function refreshPendingRequests() {
     try {
         const segments = await fetchAPI("/segments");
-        renderPendingRequests(computePendingOverdue(segments));
+        renderAttentionAlert(computePendingOverdue(segments), computeFailed(segments));
     } catch (e) {
         // Non-critical: leave whatever is currently displayed.
     }
@@ -991,11 +1090,15 @@ async function loadSegments(showSkeleton = false) {
                 const statusLabel = segmentStatusLabel(segment);
                 const statusClass = statusLabel.toLowerCase();
                 const dhcp = segment.dhcp;
-                const reqIds = Array.isArray(segment.connectivity_requests)
-                    ? segment.connectivity_requests
+                const reqIds = Array.isArray(segment.segment_connectivity_requests)
+                    ? segment.segment_connectivity_requests
                     : [];
                 const reqIdsBtn = reqIds.length
-                    ? `<button type="button" class="req-ids-btn" aria-haspopup="dialog" aria-expanded="false" data-request-ids="${escapeHTML(JSON.stringify(reqIds))}" data-submitted-at="${escapeHTML(segment.connectivity_requests_submitted_at || "")}">Request IDs</button>`
+                    ? `<button type="button" class="req-ids-btn" aria-haspopup="dialog" aria-expanded="false" data-request-ids="${escapeHTML(JSON.stringify(reqIds))}" data-submitted-at="${escapeHTML(segment.segment_connectivity_requests_submitted_at || "")}">Request IDs</button>`
+                    : "";
+                const failMsg = segment.segment_connectivity_failure;
+                const failBtn = failMsg
+                    ? `<button type="button" class="conn-failed-btn" aria-haspopup="dialog" aria-expanded="false" data-failure="${escapeHTML(failMsg)}" data-failed-at="${escapeHTML(segment.segment_connectivity_failure_at || "")}">${ICONS.alertTriangle}Workflow failed</button>`
                     : "";
                 return `
                 <tr>
@@ -1016,7 +1119,7 @@ async function loadSegments(showSkeleton = false) {
                             ? escapeHTML(segment.cluster_name)
                             : '<span class="cell-muted">—</span>'
                     }</td>
-                    <td data-col="status"><span class="badge ${statusClass}">${statusLabel}</span>${reqIdsBtn}</td>
+                    <td data-col="status"><span class="badge ${statusClass}">${statusLabel}</span>${reqIdsBtn}${failBtn}</td>
                 </tr>`;
             })
             .join("");
@@ -1172,6 +1275,13 @@ document.addEventListener("DOMContentLoaded", function () {
         ) {
             closeReqIdsPopover();
         }
+        if (
+            connFailedAnchor &&
+            !e.target.closest(".conn-failed-btn") &&
+            !e.target.closest(".conn-failed-popover")
+        ) {
+            closeConnFailedPopover();
+        }
         // Floating pending-requests alert: toggle on its button, close on outside click.
         if (e.target.closest(".pending-fab")) {
             setPendingPopoverOpen(!pendingPopoverOpen);
@@ -1183,6 +1293,7 @@ document.addEventListener("DOMContentLoaded", function () {
         if (e.key === "Escape") {
             closeFilterPopover();
             closeReqIdsPopover();
+            closeConnFailedPopover();
             setPendingPopoverOpen(false);
             columnsPopover.hidden = true;
             columnsBtn.setAttribute("aria-expanded", "false");
@@ -1196,6 +1307,12 @@ document.addEventListener("DOMContentLoaded", function () {
         if (reqBtn) {
             if (reqIdsAnchor === reqBtn) closeReqIdsPopover();
             else openReqIdsPopover(reqBtn);
+            return;
+        }
+        const failBtn = e.target.closest(".conn-failed-btn");
+        if (failBtn) {
+            if (connFailedAnchor === failBtn) closeConnFailedPopover();
+            else openConnFailedPopover(failBtn);
             return;
         }
         const cell = e.target.closest(".copyable");

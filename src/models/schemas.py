@@ -91,14 +91,14 @@ class SegmentUnlock(BaseModel):
 
 
 class SegmentConnectivityRequestsUpdate(BaseModel):
-    """Pending connectivity (firewall) request ids to display for a segment.
+    """Pending segment-connectivity (firewall) request ids to display for a segment.
 
-    Sent by the connectivity orchestrator while its firewall requests await
+    Sent by the segment-connectivity orchestrator while its firewall requests await
     approval; the UI shows the ids beside the segment's status. An empty list
     clears the display (all requests completed).
     """
     segment: str = Field(..., description="Network segment in CIDR notation (unique per segment)", examples=["192.168.1.0/24"])
-    request_ids: List[int] = Field(..., description="Pending connectivity request ids; an empty list clears the display", examples=[[123456, 654321]])
+    request_ids: List[int] = Field(..., description="Pending segment-connectivity request ids; an empty list clears the display", examples=[[123456, 654321]])
     submitted_at: Optional[datetime] = Field(default=None, description="When these requests were originally submitted; drives the \"time since submit\" header in the UI popover. Ignored/cleared when request_ids is empty.", examples=["2024-01-15T10:30:00Z"])
 
     model_config = {
@@ -109,6 +109,31 @@ class SegmentConnectivityRequestsUpdate(BaseModel):
                     "segment": "192.168.1.0/24",
                     "request_ids": [123456, 654321],
                     "submitted_at": "2024-01-15T10:30:00Z"
+                }
+            ]
+        }
+    }
+
+
+class SegmentConnectivityFailure(BaseModel):
+    """A terminal segment-connectivity-workflow failure to display for a segment.
+
+    Sent by the segment-connectivity orchestrator when its workflow fails or is
+    cancelled after submission. The UI shows a "Workflow failed" note beside
+    the segment's status; the segment stays Locked (segment-connectivity was never
+    established). Cleared automatically when a fresh set of request ids is
+    published for the segment (a new run supersedes the stale failure).
+    """
+    segment: str = Field(..., description="Network segment in CIDR notation (unique per segment)", examples=["192.168.1.0/24"])
+    message: str = Field(..., min_length=1, description="Human-readable failure reason shown in the UI popover (includes any orphaned request ids)", examples=["Segment-connectivity workflow failed: no same-site MCE segments found (orphaned next request ids: [496252, 825197])"])
+
+    model_config = {
+        "extra": "forbid",
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "segment": "192.168.1.0/24",
+                    "message": "Segment-connectivity workflow failed: no same-site MCE segments found"
                 }
             ]
         }

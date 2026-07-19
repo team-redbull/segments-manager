@@ -89,7 +89,7 @@
             <h3>Segment states</h3>
             <p>Every segment carries a <code>status</code> field. Lifecycle: <code>Locked → Available → Allocated → Available</code>. Locking is one-way — once unlocked, a segment can never become locked again via the API.</p>
             <ul>
-                <li><strong>Locked</strong> — the default status for a newly-created segment. Firewall rules for the segment have not been opened yet, so it's excluded from automatic allocation. An external service unlocks it via <code>POST /api/segments/unlock</code> (by CIDR) once provisioning is complete. While firewall requests await approval, the orchestrator publishes their ids via <code>PUT /api/segments/connectivity-requests</code>; the table then shows a <strong>Requests ID</strong> button beside the status badge (click for a popover showing time elapsed since submission and the pending ids) until the requests complete.</li>
+                <li><strong>Locked</strong> — the default status for a newly-created segment. Firewall rules for the segment have not been opened yet, so it's excluded from automatic allocation. An external service unlocks it via <code>POST /api/segments/unlock</code> (by CIDR) once provisioning is complete. While firewall requests await approval, the orchestrator publishes their ids via <code>PUT /api/segments/segment-connectivity-requests</code>; the table then shows a <strong>Requests ID</strong> button beside the status badge (click for a popover showing time elapsed since submission and the pending ids) until the requests complete.</li>
                 <li><strong>Available</strong> — unlocked and not allocated to any cluster (including previously-released segments; the <code>released</code> flag records that history).</li>
                 <li><strong>Allocated</strong> — assigned to one or more clusters.</li>
             </ul>
@@ -212,8 +212,8 @@
 
             <div class="endpoint">
                 <span class="method put">PUT</span>
-                <span class="endpoint__path">/api/segments/connectivity-requests</span>
-                <span class="endpoint__desc">— Set the pending connectivity request ids shown in the UI (empty list clears the display)</span>
+                <span class="endpoint__path">/api/segments/segment-connectivity-requests</span>
+                <span class="endpoint__desc">— Set the pending segment-connectivity request ids shown in the UI (empty list clears the display)</span>
             </div>
             <div class="code-block">{
   "segment": "192.168.1.0/24",

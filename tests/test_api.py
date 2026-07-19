@@ -427,7 +427,7 @@ class TestSegmentLocking:
 
 
 # ---------------------------------------------------------------------------
-# Unlock by segment CIDR (natural key; used by the connectivity orchestrator)
+# Unlock by segment CIDR (natural key; used by the segment-connectivity orchestrator)
 # ---------------------------------------------------------------------------
 class TestUnlockBySegment:
     def test_unlock_by_segment_value(self, segment_factory):
@@ -471,6 +471,88 @@ class TestUnlockBySegment:
 
         unauth = requests.post(f"{API}/segments/unlock", json={"segment": cidr}, timeout=TIMEOUT)
         assert unauth.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Segment-connectivity failure note (set by the orchestrator on terminal workflow
+# failure; shown beside the segment status, cleared on a fresh submission)
+# ---------------------------------------------------------------------------
+class TestSegmentConnectivityFailure:
+    _MSG = "Segment-connectivity workflow failed: no same-site MCE segments (orphaned next request ids: [496252, 825197])"
+
+    def _get(self, cidr):
+        return requests.get(f"{API}/segments/by-segment", params={"segment": cidr}, timeout=TIMEOUT)
+
+    def test_set_records_message_and_timestamp(self, segment_factory):
+        v = next_vlan()
+        cidr = cidr_for("site1", v)
+        segment_factory(site="site1", vlan_id=v, epg_name=_uid(), segment=cidr, keep_locked=True)
+
+        r = requests.put(f"{API}/segments/segment-connectivity-failure",
+                         json={"segment": cidr, "message": self._MSG},
+                         headers=AUTH_HEADERS, timeout=TIMEOUT)
+        assert r.status_code == 200, r.text
+
+        seg = self._get(cidr).json()
+        assert seg["segment_connectivity_failure"] == self._MSG
+        assert seg.get("segment_connectivity_failure_at")  # server-stamped
+        assert seg["status"] == "Locked"  # failure does not unlock
+
+    def test_fresh_request_ids_clear_the_failure(self, segment_factory):
+        v = next_vlan()
+        cidr = cidr_for("site1", v)
+        segment_factory(site="site1", vlan_id=v, epg_name=_uid(), segment=cidr, keep_locked=True)
+
+        requests.put(f"{API}/segments/segment-connectivity-failure",
+                     json={"segment": cidr, "message": self._MSG},
+                     headers=AUTH_HEADERS, timeout=TIMEOUT)
+        # A new run publishes fresh request ids — the recovery path.
+        r = requests.put(f"{API}/segments/segment-connectivity-requests",
+                         json={"segment": cidr, "request_ids": [111, 222],
+                               "submitted_at": "2026-01-01T00:00:00Z"},
+                         headers=AUTH_HEADERS, timeout=TIMEOUT)
+        assert r.status_code == 200, r.text
+
+        seg = self._get(cidr).json()
+        assert seg.get("segment_connectivity_failure") in (None, "")
+        assert seg.get("segment_connectivity_failure_at") in (None, "")
+        assert seg["segment_connectivity_requests"] == [111, 222]
+
+    def test_idempotent(self, segment_factory):
+        v = next_vlan()
+        cidr = cidr_for("site1", v)
+        segment_factory(site="site1", vlan_id=v, epg_name=_uid(), segment=cidr, keep_locked=True)
+        payload = {"segment": cidr, "message": self._MSG}
+
+        first = requests.put(f"{API}/segments/segment-connectivity-failure", json=payload,
+                             headers=AUTH_HEADERS, timeout=TIMEOUT)
+        second = requests.put(f"{API}/segments/segment-connectivity-failure", json=payload,
+                              headers=AUTH_HEADERS, timeout=TIMEOUT)
+        assert first.status_code == 200 and second.status_code == 200
+        assert "up to date" in second.json()["message"].lower()
+
+    def test_requires_auth(self, segment_factory):
+        v = next_vlan()
+        cidr = cidr_for("site1", v)
+        segment_factory(site="site1", vlan_id=v, epg_name=_uid(), segment=cidr, keep_locked=True)
+        r = requests.put(f"{API}/segments/segment-connectivity-failure",
+                         json={"segment": cidr, "message": self._MSG}, timeout=TIMEOUT)
+        assert r.status_code == 401
+
+    def test_unknown_segment_404(self):
+        r = requests.put(f"{API}/segments/segment-connectivity-failure",
+                         json={"segment": "10.99.99.0/24", "message": self._MSG},
+                         headers=AUTH_HEADERS, timeout=TIMEOUT)
+        assert r.status_code == 404
+
+    def test_empty_message_rejected(self, segment_factory):
+        v = next_vlan()
+        cidr = cidr_for("site1", v)
+        segment_factory(site="site1", vlan_id=v, epg_name=_uid(), segment=cidr, keep_locked=True)
+        r = requests.put(f"{API}/segments/segment-connectivity-failure",
+                         json={"segment": cidr, "message": ""},
+                         headers=AUTH_HEADERS, timeout=TIMEOUT)
+        assert r.status_code == 422
 
 
 # ---------------------------------------------------------------------------

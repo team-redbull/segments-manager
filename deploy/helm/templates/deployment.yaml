@@ -88,15 +88,15 @@ spec:
                 configMapKeyRef:
                   name: {{ include "segments-manager.fullname" . }}
                   key: MONGODB_TLS_INSECURE
-            # Connectivity workflow API (connectivity workflow trigger).
+            # Segment-connectivity workflow API (segment-connectivity workflow trigger).
             # Required by the app at startup (src/config/settings.py); the
             # ConfigMap key exists but was previously not mapped into the env,
-            # crash-looping the pod with "CONNECTIVITY_WORKFLOW_API_URL ... is not set".
-            - name: CONNECTIVITY_WORKFLOW_API_URL
+            # crash-looping the pod with "WORKFLOWS_API_URL ... is not set".
+            - name: WORKFLOWS_API_URL
               valueFrom:
                 configMapKeyRef:
                   name: {{ include "segments-manager.fullname" . }}
-                  key: CONNECTIVITY_WORKFLOW_API_URL
+                  key: WORKFLOWS_API_URL
             # MongoDB URL from Secret
             - name: MONGODB_URL
               valueFrom:

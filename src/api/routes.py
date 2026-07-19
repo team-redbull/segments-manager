@@ -6,7 +6,7 @@ from ..models.schemas import (
     SegmentAllocationRequest, SegmentAllocationResponse,
     SegmentRelease, SegmentUnlock, Segment,
     SegmentDhcpUpdate, SegmentClustersUpdate,
-    SegmentConnectivityRequestsUpdate
+    SegmentConnectivityRequestsUpdate, SegmentConnectivityFailure
 )
 from ..services.allocation_service import AllocationService
 from ..services.segment_service import SegmentService
@@ -88,19 +88,37 @@ async def update_segment_clusters(
     """
     return await SegmentService.update_segment_clusters(request.segment, request.cluster_names or "")
 
-@router.put("/segments/connectivity-requests")
+@router.put("/segments/segment-connectivity-requests")
 async def set_segment_connectivity_requests(
     request: SegmentConnectivityRequestsUpdate
 ):
-    """Replace the pending connectivity request ids displayed for a segment.
+    """Replace the pending segment-connectivity request ids displayed for a segment.
 
-    Set by the connectivity orchestrator after it submits firewall (open-rules)
+    Set by the segment-connectivity orchestrator after it submits firewall (open-rules)
     requests; the UI shows the ids beside the segment's status while they await
     approval. An empty list clears the display (all requests completed).
     Idempotent.
     """
-    return await SegmentService.set_connectivity_requests(
+    return await SegmentService.set_segment_connectivity_requests(
         request.segment, request.request_ids, request.submitted_at
+    )
+
+@router.put("/segments/segment-connectivity-failure")
+async def set_segment_connectivity_failure(
+    request: SegmentConnectivityFailure
+):
+    """Record a terminal segment-connectivity-workflow failure for a segment.
+
+    Set by the segment-connectivity orchestrator when its firewall (open-rules)
+    workflow fails or is cancelled after submission; the UI shows a
+    "Workflow failed" note beside the segment's status, with the message
+    (including any orphaned request ids) behind the popover. The segment stays
+    Locked — segment-connectivity was never established. The note is cleared
+    automatically when a fresh set of request ids is published (a new run).
+    Idempotent.
+    """
+    return await SegmentService.set_segment_connectivity_failure(
+        request.segment, request.message
     )
 
 

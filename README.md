@@ -17,7 +17,7 @@ Segments Manager is **decentralized and per-site**: VLAN IDs and EPG names are u
 - **MongoDB backend** — async (Motor) with atomic allocation and a short in-memory cache
 - **CSV/Excel export** and real-time search
 - **Responsive web UI** with light/dark themes
-- **Pending firewall-request visibility** — while the connectivity orchestrator waits
+- **Pending firewall-request visibility** — while the segment-connectivity orchestrator waits
   for firewall approval, a **Requests ID** button next to the segment's status opens
   a popover with the pending request ids (cleared automatically on completion)
 - **Health monitoring** — `/api/health` pings MongoDB
@@ -119,7 +119,7 @@ API_TOKEN=change-me-to-a-long-random-secret   # REQUIRED — the only credential
 | PATCH | `/api/segments` | Update a segment's DHCP flag *(auth)* |
 | PUT  | `/api/segments/clusters` | Update cluster assignment *(auth)* |
 | POST | `/api/segments/unlock` | Unlock a segment (Locked → Available) *(auth)* |
-| PUT  | `/api/segments/connectivity-requests` | Set the pending connectivity request ids shown in the UI (empty list clears) *(auth)* |
+| PUT  | `/api/segments/segment-connectivity-requests` | Set the pending connectivity request ids shown in the UI (empty list clears) *(auth)* |
 | DELETE | `/api/segments?segment=` | Delete a segment by CIDR *(auth)* |
 | POST | `/api/segments/bulk` | Bulk create *(auth)* |
 | POST | `/api/allocate-segment` | Allocate a segment for a cluster *(auth)* |

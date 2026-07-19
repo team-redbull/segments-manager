@@ -9,7 +9,8 @@ from ..utils.database_utils import DatabaseUtils
 from ..utils.validators import Validators
 from ..utils.error_handlers import handle_db_errors, retry_on_network_error
 from ..utils.logging_decorators import log_operation_timing
-from .workflow_client import trigger_connectivity_workflow
+from ..utils.time_utils import get_current_utc
+from .workflow_client import trigger_segment_connectivity_workflow
 
 logger = logging.getLogger(__name__)
 
@@ -113,10 +114,10 @@ class SegmentService:
 
         logger.info(f"Created segment with ID: {segment_id}")
 
-        # Fire-and-return: kick off the (multi-day) connectivity workflow and
+        # Fire-and-return: kick off the (multi-day) segment-connectivity workflow and
         # respond as soon as it's been triggered, without waiting for it to
         # complete. Best-effort — never fails the segment creation itself.
-        await trigger_connectivity_workflow(segment.segment, segment.type)
+        await trigger_segment_connectivity_workflow(segment.segment, segment.type)
 
         return {"message": "Segment created", "id": segment_id}
 
@@ -200,13 +201,13 @@ class SegmentService:
     @staticmethod
     @handle_db_errors
     @retry_on_network_error(max_retries=3)
-    @log_operation_timing("set_connectivity_requests", threshold_ms=2000)
-    async def set_connectivity_requests(
+    @log_operation_timing("set_segment_connectivity_requests", threshold_ms=2000)
+    async def set_segment_connectivity_requests(
         segment_value: str, request_ids: List[int], submitted_at: Optional[datetime] = None
     ) -> Dict[str, str]:
-        """Replace the pending connectivity request ids displayed for a segment.
+        """Replace the pending segment-connectivity request ids displayed for a segment.
 
-        Set by the connectivity orchestrator while its firewall (open-rules)
+        Set by the segment-connectivity orchestrator while its firewall (open-rules)
         requests await approval; the UI shows the ids beside the segment's
         status, with `submitted_at` driving the "time since submit" header in
         the popover. An empty list clears the display (all requests completed).
@@ -216,24 +217,69 @@ class SegmentService:
 
         new_value = request_ids or None
         new_submitted_at = submitted_at if new_value else None
+        # A fresh submission (non-empty ids) supersedes any prior failure note:
+        # re-triggering the workflow is exactly the operator's recovery path, so
+        # clearing the "Workflow failed" note here keeps the row consistent.
+        has_failure = existing_segment.get("segment_connectivity_failure") is not None
+        clear_failure = bool(new_value) and has_failure
         if (
-            existing_segment.get("connectivity_requests") == new_value
-            and existing_segment.get("connectivity_requests_submitted_at") == new_submitted_at
+            existing_segment.get("segment_connectivity_requests") == new_value
+            and existing_segment.get("segment_connectivity_requests_submitted_at") == new_submitted_at
+            and not clear_failure
         ):
+            return {"message": "Segment already up to date"}
+
+        update: Dict[str, Any] = {
+            "segment_connectivity_requests": new_value,
+            "segment_connectivity_requests_submitted_at": new_submitted_at,
+        }
+        if clear_failure:
+            update["segment_connectivity_failure"] = None
+            update["segment_connectivity_failure_at"] = None
+
+        success = await DatabaseUtils.update_segment_by_id(
+            str(existing_segment["_id"]), update
+        )
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to update segment")
+
+        logger.info(f"Updated segment {segment_value}: segment_connectivity_requests={new_value}")
+        return {"message": "Segment-connectivity requests updated"}
+
+    @staticmethod
+    @handle_db_errors
+    @retry_on_network_error(max_retries=3)
+    @log_operation_timing("set_segment_connectivity_failure", threshold_ms=2000)
+    async def set_segment_connectivity_failure(
+        segment_value: str, message: str
+    ) -> Dict[str, str]:
+        """Record a terminal segment-connectivity-workflow failure for a segment.
+
+        Set by the segment-connectivity orchestrator when its firewall (open-rules)
+        workflow fails or is cancelled after submission. The UI shows a
+        "Workflow failed" note beside the segment's status (the segment stays
+        Locked — segment-connectivity was never established); `segment_connectivity_failure_at`
+        drives the "N ago" header in the popover. Cleared automatically when a
+        fresh set of request ids is published (see set_segment_connectivity_requests).
+        Idempotent: re-recording the same message is a no-op.
+        """
+        existing_segment = await SegmentService._get_segment_or_404(segment_value)
+
+        if existing_segment.get("segment_connectivity_failure") == message:
             return {"message": "Segment already up to date"}
 
         success = await DatabaseUtils.update_segment_by_id(
             str(existing_segment["_id"]),
             {
-                "connectivity_requests": new_value,
-                "connectivity_requests_submitted_at": new_submitted_at,
+                "segment_connectivity_failure": message,
+                "segment_connectivity_failure_at": get_current_utc(),
             },
         )
         if not success:
             raise HTTPException(status_code=500, detail="Failed to update segment")
 
-        logger.info(f"Updated segment {segment_value}: connectivity_requests={new_value}")
-        return {"message": "Segment connectivity requests updated"}
+        logger.info(f"Recorded segment-connectivity failure for segment {segment_value}")
+        return {"message": "Segment-connectivity failure recorded"}
 
     @staticmethod
     @handle_db_errors
@@ -245,7 +291,7 @@ class SegmentService:
         "Locked" is the initial status of every new segment (firewall rules
         not yet open), and segments are excluded from automatic VLAN
         allocation until unlocked. Intended for callers (e.g. the
-        connectivity orchestrator) that know the network value. This is a
+        segment-connectivity orchestrator) that know the network value. This is a
         one-way lifecycle transition — segments cannot be re-locked via the
         API. Idempotent: unlocking a segment that is already "Available" (or
         "Allocated") is a no-op.
@@ -331,7 +377,7 @@ class SegmentService:
                     new_segment = await DatabaseUtils.create_segment(segment_data)
 
                     # Best-effort — never fails this row's creation.
-                    await trigger_connectivity_workflow(segment.segment, segment.type)
+                    await trigger_segment_connectivity_workflow(segment.segment, segment.type)
 
                     created_in_bulk.add(segment_key)
                     existing_segments.append(new_segment if isinstance(new_segment, dict) else segment_data)

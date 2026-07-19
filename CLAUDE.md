@@ -46,11 +46,11 @@ MONGODB_DB_NAME="segments_manager"                    # optional, default: segme
 SITE_PREFIXES="site1:192,site2:193,site3:194"      # site:first-octet — REQUIRED. The single source of truth for
                                                     # configured sites; SITES is derived from its keys (no separate var)
 API_TOKEN="<long-random-secret>"                   # REQUIRED (fail-fast) — Bearer token for write requests
-CONNECTIVITY_WORKFLOW_API_URL="http://localhost:8080"          # REQUIRED (fail-fast) — base URL of the Cluster Orchestrator's
-                                                    # unified workflows API (POST /workflows/connectivity)
+WORKFLOWS_API_URL="http://localhost:8080"          # REQUIRED (fail-fast) — base URL of the Cluster Orchestrator's
+                                                    # unified workflows API (POST /workflows/segment-connectivity)
 ```
 
-> **Connectivity workflow trigger.** Both `POST /api/segments` and `POST /api/segments/bulk` (per created segment) call `POST {CONNECTIVITY_WORKFLOW_API_URL}/workflows/connectivity` (`src/services/workflow_client.py`) right after the segment is durably created in Mongo, with body `{"segment", "type"}`. That endpoint starts a Temporal workflow and returns 202 immediately — the workflow itself (firewall approval) can take days, so this is only the fast ack round-trip, not a wait for completion. The call is best-effort: any failure (timeout, connection error, non-2xx) is logged and swallowed, never turning an already-successful segment creation into a failed API response. The trigger is sent unconditionally for every segment `type` — the workflow itself decides which types connectivity is implemented for.
+> **Segment-connectivity workflow trigger.** Both `POST /api/segments` and `POST /api/segments/bulk` (per created segment) call `POST {WORKFLOWS_API_URL}/workflows/segment-connectivity` (`src/services/workflow_client.py`) right after the segment is durably created in Mongo, with body `{"segment", "type"}`. That endpoint starts a Temporal workflow and returns 202 immediately — the workflow itself (firewall approval) can take days, so this is only the fast ack round-trip, not a wait for completion. The call is best-effort: any failure (timeout, connection error, non-2xx) is logged and swallowed, never turning an already-successful segment creation into a failed API response. The trigger is sent unconditionally for every segment `type` — the workflow itself decides which types segment-connectivity is implemented for.
 
 > **API authentication.** `GET`/`HEAD` requests are open (the read-only web UI needs no auth). Every mutating request (`POST`/`PUT`/`PATCH`/`DELETE`) under `/api/*` must present the API token as `Authorization: Bearer <API_TOKEN>`. The token is the **only** credential — there is no username/password login, session, or cookie (all removed). Enforcement is centralized in one middleware in `src/app.py` (fail-closed — new write routes are protected automatically); there are no per-route auth dependencies. The token check (`verify_api_token`) uses a constant-time comparison.
 
@@ -80,7 +80,7 @@ The project uses **Podman**, not Docker (all scripts use `podman`).
 
 ### Helm / Kubernetes
 
-Chart in `deploy/helm/`. Set `mongodb.url` (stored in a generated Secret) or point at an existing secret via `mongodb.existingSecret`/`mongodb.existingSecretKey`. Non-sensitive config (`SITE_PREFIXES`, `MONGODB_DB_NAME`, server/log settings, `config.connectivityWorkflowApiUrl`) is in a ConfigMap.
+Chart in `deploy/helm/`. Set `mongodb.url` (stored in a generated Secret) or point at an existing secret via `mongodb.existingSecret`/`mongodb.existingSecretKey`. Non-sensitive config (`SITE_PREFIXES`, `MONGODB_DB_NAME`, server/log settings, `config.workflowsApiUrl`) is in a ConfigMap.
 
 ---
 
@@ -111,8 +111,8 @@ Chart in `deploy/helm/`. Set `mongodb.url` (stored in a generated Secret) or poi
 3. **Async throughout** — all I/O is `async`/`await` on Motor.
 4. **Atomic allocation** — `allocate_segment()` uses `find_one_and_update(..., return_document=AFTER)` so concurrent callers can never receive the same segment.
 5. **Short in-memory cache** — the full segments list is cached (60s TTL) with in-flight request de-duplication (`src/database/cache.py`); invalidated on every write.
-6. **Fail-fast config** — missing `MONGODB_URL`, missing `API_TOKEN`, an empty/unset `SITE_PREFIXES`, or missing `CONNECTIVITY_WORKFLOW_API_URL`, crashes at startup.
-7. **Fire-and-return connectivity trigger** — segment creation calls the Cluster Orchestrator's workflow API (`src/services/workflow_client.py`) after the Mongo write, awaits only the fast trigger ack (not the multi-day workflow), and never fails the request if the trigger itself fails.
+6. **Fail-fast config** — missing `MONGODB_URL`, missing `API_TOKEN`, an empty/unset `SITE_PREFIXES`, or missing `WORKFLOWS_API_URL`, crashes at startup.
+7. **Fire-and-return segment-connectivity trigger** — segment creation calls the Cluster Orchestrator's workflow API (`src/services/workflow_client.py`) after the Mongo write, awaits only the fast trigger ack (not the multi-day workflow), and never fails the request if the trigger itself fails.
 
 ---
 
@@ -148,7 +148,7 @@ segments_2/
 │   ├── services/           # Business logic
 │   │   ├── allocation_service.py   # allocate/release VLAN
 │   │   ├── segment_service.py      # segment CRUD + bulk import
-│   │   ├── workflow_client.py      # best-effort connectivity workflow trigger (POST /workflows/connectivity)
+│   │   ├── workflow_client.py      # best-effort segment-connectivity workflow trigger (POST /workflows/segment-connectivity)
 │   │   ├── stats_service.py        # statistics + health check (pings MongoDB)
 │   │   ├── export_service.py       # CSV/Excel export
 │   │   └── logs_service.py
@@ -185,12 +185,12 @@ Collection: **`segments`**
     "released":     bool,
     "released_at":  datetime | None,
     "status":       str,             # "Locked" | "Available" | "Allocated" — server-managed lifecycle
-    "connectivity_requests": list[int] | None,  # pending firewall request ids shown in the UI beside status;
-                                                # set/cleared by the connectivity orchestrator
-                                                # (PUT /api/segments/connectivity-requests; empty list clears)
-    "connectivity_requests_submitted_at": datetime | None,  # when the pending ids were submitted;
+    "segment_connectivity_requests": list[int] | None,  # pending firewall request ids shown in the UI beside status;
+                                                # set/cleared by the segment-connectivity orchestrator
+                                                # (PUT /api/segments/segment-connectivity-requests; empty list clears)
+    "segment_connectivity_requests_submitted_at": datetime | None,  # when the pending ids were submitted;
                                                 # drives the "time since submit" header in the UI popover;
-                                                # cleared together with connectivity_requests
+                                                # cleared together with segment_connectivity_requests
 }
 ```
 
@@ -198,7 +198,7 @@ Collection: **`segments`**
 
 > **Locked is the default status for new segments.** Lifecycle is one-way: `Locked → Available → Allocated → Available` — a segment can never become locked again via the API (no re-lock endpoint exists). It signals that firewall rules haven't been opened yet. `allocate_segment()` only considers segments with `status: "Available"`. An external service unlocks a segment via `POST /api/segments/unlock` with body `{"segment": "<cidr>"}` once provisioning is done.
 
-> **Pending connectivity request ids.** While waiting for firewall approval, the connectivity orchestrator mirrors its still-pending request ids onto the segment via `PUT /api/segments/connectivity-requests` (body `{"segment", "request_ids", "submitted_at"}`; `submitted_at` is optional, replace semantics, idempotent, empty list clears both fields — stored as `None`). The UI renders a **Requests ID** button beside the status badge whenever the list is non-empty; clicking it opens a popover anchored to the button. The popover header shows elapsed time since `submitted_at` ("Submitted N minutes ago", escalating to hours then days), followed by the pending ids. The display disappears automatically once the orchestrator sends the final empty update (all requests complete).
+> **Pending segment-connectivity request ids.** While waiting for firewall approval, the segment-connectivity orchestrator mirrors its still-pending request ids onto the segment via `PUT /api/segments/segment-connectivity-requests` (body `{"segment", "request_ids", "submitted_at"}`; `submitted_at` is optional, replace semantics, idempotent, empty list clears both fields — stored as `None`). The UI renders a **Requests ID** button beside the status badge whenever the list is non-empty; clicking it opens a popover anchored to the button. The popover header shows elapsed time since `submitted_at` ("Submitted N minutes ago", escalating to hours then days), followed by the pending ids. The display disappears automatically once the orchestrator sends the final empty update (all requests complete).
 
 **Indexes** (created in `init_storage()`):
 - `unique({site: 1, vlan_id: 1})` — one VLAN ID per site
@@ -253,7 +253,7 @@ VLAN uniqueness is enforced both at the app level (`check_vlan_exists(site, vlan
 1. **Production application** — emphasize reliability, validation, error handling.
 2. **MongoDB is the source of truth** — all data ops go through the Motor layer in `src/database/`.
 3. **No VRF, no external/centralized IPAM** — the app is decentralized and per-site. Do not reintroduce either concept.
-4. **Fail-fast config** — `MONGODB_URL`, `API_TOKEN`, `CONNECTIVITY_WORKFLOW_API_URL`, and a non-empty `SITE_PREFIXES` are required at startup. `SITES` is not a separate env var — it's derived from `SITE_PREFIXES`' keys.
+4. **Fail-fast config** — `MONGODB_URL`, `API_TOKEN`, `WORKFLOWS_API_URL`, and a non-empty `SITE_PREFIXES` are required at startup. `SITES` is not a separate env var — it's derived from `SITE_PREFIXES`' keys.
 5. **Async throughout** — everything touching the DB is `async`.
 6. **Invalidate cache on writes** — call `invalidate_cache(CACHE_KEY_SEGMENTS)` after modifications (the Mongo write functions already do this).
 7. **Wrap service methods** with `@handle_db_errors` + `@retry_on_network_error` + `@log_operation_timing` (or the combined `@db_operation`).
@@ -265,7 +265,7 @@ VLAN uniqueness is enforced both at the app level (`check_vlan_exists(site, vlan
 ## Dependencies
 
 **Python 3.11+**. Key packages (`requirements.txt`):
-`fastapi`, `uvicorn[standard]`, `pydantic` (v2), `python-multipart`, `pandas`, `openpyxl`, `motor`, `pymongo`, `python-dotenv` (loads `.env` for local dev; real env vars take precedence), `httpx` (connectivity workflow trigger).
+`fastapi`, `uvicorn[standard]`, `pydantic` (v2), `python-multipart`, `pandas`, `openpyxl`, `motor`, `pymongo`, `python-dotenv` (loads `.env` for local dev; real env vars take precedence), `httpx` (segment-connectivity workflow trigger).
 
 `pytest` is used for tests (install separately if not present).
 

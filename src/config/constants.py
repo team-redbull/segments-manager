@@ -47,8 +47,8 @@ class RateLimits:
 
 
 class WorkflowTrigger:
-    """Connectivity workflow trigger HTTP call (segments-manager -> workflows API)"""
-    # The workflows API's POST /workflows/connectivity itself starts a Temporal
+    """Segment-connectivity workflow trigger HTTP call (segments-manager -> workflows API)"""
+    # The workflows API's POST /workflows/segment-connectivity itself starts a Temporal
     # workflow and returns 202 immediately, so this is just the ack round-trip
     # — not the (multi-day) workflow itself.
     TIMEOUT_SECONDS = 5.0

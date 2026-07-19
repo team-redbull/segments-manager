@@ -23,7 +23,7 @@ async def init_mongo_client() -> None:
     global _motor_client, _db
     # tz_aware: datetimes read back from Mongo carry UTC tzinfo instead of being
     # naive. Without it, timestamps serialize to offset-less ISO strings (e.g.
-    # "2026-07-13T10:00:00"), which browsers parse as LOCAL time — the connectivity
+    # "2026-07-13T10:00:00"), which browsers parse as LOCAL time — the segment-connectivity
     # "Submitted N ago" popover would jump by the viewer's UTC offset immediately
     # after submission. Mongo stores all datetimes as UTC, so this is lossless.
     client_kwargs = {"tz_aware": True, "tzinfo": timezone.utc}

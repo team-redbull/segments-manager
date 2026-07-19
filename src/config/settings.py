@@ -31,22 +31,22 @@ if not MONGODB_URL:
     print(f"ERROR: {error_msg}", file=sys.stderr)
     raise ValueError(error_msg)
 
-# Connectivity workflow API — base URL of the unified FastAPI service
-# (api.py in the workflows repo) that starts the connectivity workflow.
+# Segment-connectivity workflow API — base URL of the unified FastAPI service
+# (api.py in the workflows repo) that starts the segment-connectivity workflow.
 # Required: segment creation triggers it, so a missing URL must fail loudly at
 # startup rather than silently skipping the trigger in production.
-CONNECTIVITY_WORKFLOW_API_URL = os.getenv("CONNECTIVITY_WORKFLOW_API_URL")
+WORKFLOWS_API_URL = os.getenv("WORKFLOWS_API_URL")
 
-if not CONNECTIVITY_WORKFLOW_API_URL:
+if not WORKFLOWS_API_URL:
     error_msg = (
-        "CRITICAL CONFIGURATION ERROR: CONNECTIVITY_WORKFLOW_API_URL environment variable is not set!\n"
-        "Please set CONNECTIVITY_WORKFLOW_API_URL in your environment or .env file.\n"
-        "Example: export CONNECTIVITY_WORKFLOW_API_URL='http://localhost:8080'"
+        "CRITICAL CONFIGURATION ERROR: WORKFLOWS_API_URL environment variable is not set!\n"
+        "Please set WORKFLOWS_API_URL in your environment or .env file.\n"
+        "Example: export WORKFLOWS_API_URL='http://localhost:8080'"
     )
     print(f"ERROR: {error_msg}", file=sys.stderr)
     raise ValueError(error_msg)
 
-CONNECTIVITY_WORKFLOW_API_URL = CONNECTIVITY_WORKFLOW_API_URL.rstrip("/")
+WORKFLOWS_API_URL = WORKFLOWS_API_URL.rstrip("/")
 
 # Site IP Prefix Configuration — the single source of truth for configured
 # sites. SITES is derived from its keys rather than being its own env var,
