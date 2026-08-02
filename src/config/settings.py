@@ -31,22 +31,14 @@ if not MONGODB_URL:
     print(f"ERROR: {error_msg}", file=sys.stderr)
     raise ValueError(error_msg)
 
-# Segment-connectivity workflow API — base URL of the unified FastAPI service
-# (api.py in the workflows repo) that starts the segment-connectivity workflow.
-# Required: segment creation triggers it, so a missing URL must fail loudly at
-# startup rather than silently skipping the trigger in production.
-WORKFLOWS_API_URL = os.getenv("WORKFLOWS_API_URL")
-
-if not WORKFLOWS_API_URL:
-    error_msg = (
-        "CRITICAL CONFIGURATION ERROR: WORKFLOWS_API_URL environment variable is not set!\n"
-        "Please set WORKFLOWS_API_URL in your environment or .env file.\n"
-        "Example: export WORKFLOWS_API_URL='http://localhost:8080'"
-    )
-    print(f"ERROR: {error_msg}", file=sys.stderr)
-    raise ValueError(error_msg)
-
-WORKFLOWS_API_URL = WORKFLOWS_API_URL.rstrip("/")
+# NOTE: this service no longer knows about the workflows API. Segment creation
+# used to fire a best-effort trigger at it (WORKFLOWS_API_URL), which put the
+# creation itself outside Temporal — invisible in the Temporal UI, and silently
+# skipped whenever that call failed. The direction is now reversed: the
+# segment-connectivity workflow is triggered directly by its caller and calls
+# POST /api/segments here as its own first step, so one Temporal run covers the
+# whole lifecycle. This service is a plain dependency of that workflow and
+# triggers nothing.
 
 # Site IP Prefix Configuration — the single source of truth for configured
 # sites. SITES is derived from its keys rather than being its own env var,

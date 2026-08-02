@@ -10,7 +10,6 @@ from ..utils.validators import Validators
 from ..utils.error_handlers import handle_db_errors, retry_on_network_error
 from ..utils.logging_decorators import log_operation_timing
 from ..utils.time_utils import get_current_utc
-from .workflow_client import trigger_segment_connectivity_workflow
 
 logger = logging.getLogger(__name__)
 
@@ -113,11 +112,6 @@ class SegmentService:
         segment_id = await DatabaseUtils.create_segment(segment_data)
 
         logger.info(f"Created segment with ID: {segment_id}")
-
-        # Fire-and-return: kick off the (multi-day) segment-connectivity workflow and
-        # respond as soon as it's been triggered, without waiting for it to
-        # complete. Best-effort — never fails the segment creation itself.
-        await trigger_segment_connectivity_workflow(segment.segment, segment.type)
 
         return {"message": "Segment created", "id": segment_id}
 
@@ -375,9 +369,6 @@ class SegmentService:
 
                     segment_data = SegmentService._segment_to_dict(segment)
                     new_segment = await DatabaseUtils.create_segment(segment_data)
-
-                    # Best-effort — never fails this row's creation.
-                    await trigger_segment_connectivity_workflow(segment.segment, segment.type)
 
                     created_in_bulk.add(segment_key)
                     existing_segments.append(new_segment if isinstance(new_segment, dict) else segment_data)

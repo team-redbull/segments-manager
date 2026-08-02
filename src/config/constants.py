@@ -46,14 +46,6 @@ class RateLimits:
     DEFAULT_MAX_REQUESTS = 100  # Maximum requests per time window
 
 
-class WorkflowTrigger:
-    """Segment-connectivity workflow trigger HTTP call (segments-manager -> workflows API)"""
-    # The workflows API's POST /workflows/segment-connectivity itself starts a Temporal
-    # workflow and returns 202 immediately, so this is just the ack round-trip
-    # — not the (multi-day) workflow itself.
-    TIMEOUT_SECONDS = 5.0
-
-
 # Export all constant classes
 __all__ = [
     "CacheTTL",
@@ -62,5 +54,4 @@ __all__ = [
     "FieldLengths",
     "PerformanceThresholds",
     "RateLimits",
-    "WorkflowTrigger",
 ]
