@@ -43,7 +43,12 @@ else
     # Set defaults (WARNING: MONGODB_URL must point at a reachable MongoDB)
     export MONGODB_URL="${MONGODB_URL:-mongodb://localhost:27017}"
     export MONGODB_DB_NAME="${MONGODB_DB_NAME:-segments_manager}"
-    export SITE_PREFIXES="${SITE_PREFIXES:-site1:192,site2:193,site3:194}"
+    # Assigned in a plain if rather than ${VAR:-default}: the JSON's nested
+    # braces confuse that expansion and it silently truncates to the first site.
+    if [ -z "$SITE_NETWORKS" ]; then
+        SITE_NETWORKS='{"site1": {"pool": "192.10.0.0/16", "bmc": "10.50.0.0/16"}, "site2": {"pool": "193.51.0.0/16", "bmc": "10.51.0.0/16"}, "site3": {"pool": "194.52.0.0/16", "bmc": "10.52.0.0/16"}}'
+    fi
+    export SITE_NETWORKS
     export SERVER_HOST="${SERVER_HOST:-0.0.0.0}"
     export SERVER_PORT="${SERVER_PORT:-8000}"
     export LOG_LEVEL="${LOG_LEVEL:-INFO}"
@@ -52,7 +57,7 @@ fi
 echo ""
 echo "🔧 Environment Configuration:"
 echo "   MongoDB DB: $MONGODB_DB_NAME"
-echo "   Site Prefixes: $SITE_PREFIXES"
+echo "   Site Networks: $SITE_NETWORKS"
 # Mask credentials in the connection string before printing
 echo "   MongoDB URL: $(echo "$MONGODB_URL" | sed -E 's#://[^@]*@#://****:****@#')"
 
@@ -81,7 +86,7 @@ podman run -d \
     -p 8000:8000 \
     -e MONGODB_URL="$MONGODB_URL" \
     -e MONGODB_DB_NAME="$MONGODB_DB_NAME" \
-    -e SITE_PREFIXES="$SITE_PREFIXES" \
+    -e SITE_NETWORKS="$SITE_NETWORKS" \
     -e SERVER_HOST="$SERVER_HOST" \
     -e SERVER_PORT="$SERVER_PORT" \
     -e LOG_LEVEL="$LOG_LEVEL" \
@@ -121,7 +126,7 @@ if [ $? -eq 0 ]; then
         echo "🔍 Troubleshooting:"
         echo "   1. Check MongoDB connectivity (MONGODB_URL reachable from the container)"
         echo "   2. Verify MongoDB credentials in MONGODB_URL are valid"
-        echo "   3. Verify all environment variables are set (especially SITE_PREFIXES)"
+        echo "   3. Verify all environment variables are set (especially SITE_NETWORKS)"
         echo "   4. Check container logs: podman logs $CONTAINER_NAME"
     fi
     

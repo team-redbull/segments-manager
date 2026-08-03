@@ -141,7 +141,7 @@ POST /api/release-vlan {cluster_name, site} → AllocationService.release_vlan()
 - **Facade** — `DatabaseUtils` and `Validators` present one aggregated surface over focused modules.
 - **Service layer** — business logic isolated from HTTP concerns.
 - **DTOs** — Pydantic models for type-safe, validated request/response bodies.
-- **Fail-fast configuration** — startup aborts on missing `MONGODB_URL` or incomplete `SITE_PREFIXES`.
+- **Fail-fast configuration** — startup aborts on missing `MONGODB_URL` or an invalid `SITE_NETWORKS` topology.
 - **Decorator stack** — cross-cutting error handling, retries, and timing applied uniformly to service methods.
 
 ---
@@ -160,7 +160,7 @@ POST /api/release-vlan {cluster_name, site} → AllocationService.release_vlan()
 Layered validators in `src/utils/validators/`:
 
 - **Input** — site membership, VLAN ID range (1–4094), EPG name (length + safe charset), cluster name, description.
-- **Network** — CIDR format & strict network address, **site IP-prefix enforcement**, subnet mask /16–/31, reserved-range rejection, overlap detection.
+- **Network** — CIDR format & strict network address, **site pool containment** (the segment must be a subnet of its site’s configured pool), subnet mask /16–/31, reserved-range rejection, overlap detection.
 - **Organization** — allocation state (cannot delete an allocated segment), **per-site EPG-name uniqueness**.
 
 Per-site VLAN uniqueness is enforced twice: at the application layer (`check_vlan_exists`) and by the MongoDB `unique({site, vlan_id})` index — so even a race that slips past the app is rejected by the database.

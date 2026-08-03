@@ -82,7 +82,7 @@ class TestSegmentValidation:
 
     def test_vlan_id_out_of_range(self, segment_factory):
         r = segment_factory(site="site1", vlan_id=9999, epg_name=_uid(),
-                            segment="192.50.50.0/24")
+                            segment="192.10.50.0/24")
         assert r.status_code == 422
 
     def test_invalid_site(self, segment_factory):
@@ -91,24 +91,50 @@ class TestSegmentValidation:
                             segment=cidr_for("site1", v))
         assert r.status_code in (400, 422)
 
-    def test_wrong_ip_prefix_for_site(self, segment_factory):
+    def test_segment_from_another_sites_pool_rejected(self, segment_factory):
         v = next_vlan()
-        # site1 expects 192.x; give it a 193.x (site2's prefix)
+        # site2's pool is a different /16 entirely
         r = segment_factory(site="site1", vlan_id=v, epg_name=_uid(),
                             segment=cidr_for("site2", v))
         assert r.status_code == 400
 
+    def test_segment_outside_pool_same_first_octet_rejected(self, segment_factory):
+        """The case the old first-octet rule wrongly accepted.
+
+        site1's pool is 192.10.0.0/16, so 192.99.x is the right first octet but
+        the wrong /16. Under the previous `first_octet == "192"` check this was
+        allowed straight through.
+        """
+        v = next_vlan()
+        r = segment_factory(site="site1", vlan_id=v, epg_name=_uid(),
+                            segment="192.99.0.0/24")
+        assert r.status_code == 400
+        assert "outside site" in r.json()["detail"]
+
+    def test_ipv6_segment_rejected(self, segment_factory):
+        """`segment` is an unvalidated string on the request model, so an IPv6
+        CIDR reaches the validator from any caller. It must be a 400 naming the
+        address family — not a 500, and not a misleading "outside the pool"."""
+        v = next_vlan()
+        r = segment_factory(site="site1", vlan_id=v, epg_name=_uid(),
+                            segment="2001:db8::/48")
+        assert r.status_code == 400
+        assert "Only IPv4" in r.json()["detail"]
+
     def test_non_network_address_rejected(self, segment_factory):
         v = next_vlan()
         r = segment_factory(site="site1", vlan_id=v, epg_name=_uid(),
-                            segment="192.168.1.5/24")  # host address, not network
+                            segment="192.10.1.5/24")  # host address, not network
         assert r.status_code == 400
+        # Must fail on the network-address rule, not on pool containment
+        assert "network address" in r.json()["detail"]
 
     def test_missing_mask_rejected(self, segment_factory):
         v = next_vlan()
         r = segment_factory(site="site1", vlan_id=v, epg_name=_uid(),
-                            segment="192.168.1.0")  # no /mask
+                            segment="192.10.1.0")  # no /mask
         assert r.status_code == 400
+        assert "subnet mask" in r.json()["detail"]
 
 
 # ---------------------------------------------------------------------------
@@ -560,13 +586,27 @@ class TestSegmentConnectivityFailure:
 # ---------------------------------------------------------------------------
 class TestStats:
     def test_stats_shape(self):
+        """GET /api/stats is trimmed to {site, by_type} for the UI site cards.
+
+        Site-level totals/utilization are still computed by
+        get_all_sites_statistics() but are only exposed via /api/health.
+        """
         r = requests.get(f"{API}/stats", timeout=TIMEOUT)
         assert r.status_code == 200
         stats = r.json()
         assert isinstance(stats, list) and len(stats) > 0
         s = stats[0]
-        for key in ("site", "total_segments", "allocated", "available", "locked", "utilization"):
-            assert key in s
+        assert set(s) == {"site", "by_type"}
+        for entry in s["by_type"]:
+            assert set(entry) == {"type", "allocated", "total"}
+
+    def test_health_exposes_site_totals(self):
+        r = requests.get(f"{API}/health", timeout=TIMEOUT)
+        assert r.status_code == 200
+        summary = r.json()["sites_summary"]
+        for site_stats in summary.values():
+            for key in ("total", "allocated", "available", "utilization"):
+                assert key in site_stats
 
 
 if __name__ == "__main__":

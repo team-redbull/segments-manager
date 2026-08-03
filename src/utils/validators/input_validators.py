@@ -7,7 +7,7 @@ import logging
 import re
 from fastapi import HTTPException
 
-from ...config.settings import SITES
+from ...config.settings import SITES, resolve_site
 
 logger = logging.getLogger(__name__)
 
@@ -19,10 +19,9 @@ class InputValidators:
     def validate_site(site: str) -> None:
         """Validate if site is in configured sites (case-insensitive)"""
         logger.debug(f"Validating site: {site}")
-        # Normalize to lowercase for case-insensitive comparison
-        site_lower = site.lower()
-        sites_lower = [s.lower() for s in SITES]
-        if site_lower not in sites_lower:
+        # resolve_site owns the case-insensitive rule so this check and the pool
+        # lookup in validate_segment_format can never disagree about a site.
+        if resolve_site(site) is None:
             logger.warning(f"Invalid site: {site}, valid sites: {SITES}")
             raise HTTPException(
                 status_code=400,

@@ -22,7 +22,7 @@ The suite is driven by environment variables (all optional):
 The server under test must be configured with:
 
 ```
-SITE_PREFIXES=site1:192,site2:193,site3:194
+SITE_NETWORKS='{"site1": {"pool": "192.10.0.0/16", "bmc": "10.50.0.0/16"}, "site2": {"pool": "193.51.0.0/16", "bmc": "10.51.0.0/16"}, "site3": {"pool": "194.52.0.0/16", "bmc": "10.52.0.0/16"}}'
 API_TOKEN=test-token
 ```
 
@@ -35,7 +35,7 @@ If the server is unreachable, the whole suite **skips** (it does not fail).
 ```bash
 # terminal 1 — start the app (needs a MongoDB)
 MONGODB_URL=mongodb://localhost:27017 \
-SITE_PREFIXES=site1:192,site2:193,site3:194 \
+SITE_NETWORKS='{"site1": {"pool": "192.10.0.0/16", "bmc": "10.50.0.0/16"}, "site2": {"pool": "193.51.0.0/16", "bmc": "10.51.0.0/16"}, "site3": {"pool": "194.52.0.0/16", "bmc": "10.52.0.0/16"}}' \
 API_TOKEN=test-token \
 python main.py
 
@@ -53,7 +53,7 @@ podman run -d --name mongo -p 27017:27017 mongo:7
 # start the app image, pointed at that MongoDB
 podman run -d --name segments-manager --network host \
   -e MONGODB_URL="mongodb://127.0.0.1:27017" \
-  -e SITE_PREFIXES="site1:192,site2:193,site3:194" \
+  -e SITE_NETWORKS='{"site1": {"pool": "192.10.0.0/16", "bmc": "10.50.0.0/16"}, "site2": {"pool": "193.51.0.0/16", "bmc": "10.51.0.0/16"}, "site3": {"pool": "194.52.0.0/16", "bmc": "10.52.0.0/16"}}' \
   -e API_TOKEN="test-token" \
   docker.io/roi12345/segments-manager:mongodb
 

@@ -9,7 +9,8 @@ import ipaddress
 from typing import List, Dict, Any
 from fastapi import HTTPException
 
-from ...config.settings import get_site_prefix
+from ...config.settings import get_site_pool
+from ...config.constants import SubnetConstraints
 
 logger = logging.getLogger(__name__)
 
@@ -19,24 +20,24 @@ class NetworkValidators:
 
     @staticmethod
     def validate_segment_format(segment: str, site: str) -> None:
-        """Validate that segment IP matches the site's IP prefix and is proper network format.
+        """Validate that the segment is a proper network address inside the site's pool.
 
         Args:
-            segment: IP network in CIDR format (e.g., "192.168.1.0/24")
+            segment: IP network in CIDR format (e.g., "192.10.1.0/24")
             site: Site name (e.g., "Site1")
 
         Raises:
-            HTTPException: If segment format is invalid or doesn't match expected prefix
+            HTTPException: If the segment is malformed or falls outside the site's pool
         """
         logger.debug(f"Validating segment format: '{segment}' for site '{site}'")
-        expected_prefix = get_site_prefix(site)
+        pool = get_site_pool(site)
 
-        if expected_prefix is None:
-            logger.error(f"No IP prefix configured for site '{site}'")
+        if pool is None:
+            logger.error(f"No network pool configured for site '{site}'")
             raise HTTPException(
                 status_code=400,
                 detail=f"Site '{site}' is not configured. "
-                       f"Please ensure the site is listed in SITES and has a corresponding entry in SITE_PREFIXES."
+                       f"Add it to SITE_NETWORKS with a 'pool' CIDR."
             )
 
         try:
@@ -64,16 +65,35 @@ class NetworkValidators:
                     detail=f"Invalid network format. Use network address '{correct_format}' instead of '{segment}'"
                 )
 
-            # Parse the network segment for site prefix validation
             network = ipaddress.ip_network(segment, strict=False)
-            first_octet = str(network.network_address).split('.')[0]
 
-            if first_octet != expected_prefix:
-                logger.warning(f"IP prefix mismatch for site '{site}': expected '{expected_prefix}', got '{first_octet}'")
+            # This service is IPv4-only, and `segment` is an unvalidated string
+            # on the request model, so a syntactically valid IPv6 CIDR reaches
+            # here from any caller. Reject it by name rather than letting it
+            # fall through to the pool check: it would report "outside the pool"
+            # when the real problem is the address family, and subnet_of across
+            # families raises TypeError — which the `except ValueError` below
+            # does not catch, turning a client error into a 500.
+            if network.version != 4:
+                logger.warning(f"Non-IPv4 segment rejected: {segment}")
                 raise HTTPException(
                     status_code=400,
-                    detail=f"Invalid IP prefix for site '{site}'. "
-                           f"Expected to start with '{expected_prefix}', got '{first_octet}'"
+                    detail=f"Only IPv4 segments are supported, got IPv{network.version} "
+                           f"address {segment}."
+                )
+
+            # Enforce that the segment falls inside the site's allocatable pool.
+            # A segment equal to the whole pool is permitted (subnet_of is
+            # inclusive): it is a legal if pathological allocation, and
+            # validate_ip_overlap then blocks every other segment at the site.
+            # Both sides are guaranteed IPv4 here — the pool by startup
+            # validation, the segment by the check above — so subnet_of is safe.
+            if not network.subnet_of(pool):
+                logger.warning(f"Segment {segment} is outside site '{site}' pool {pool}")
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Segment {segment} is outside site '{site}' network pool {pool}. "
+                           f"Every segment at '{site}' must fall inside {pool}."
                 )
 
         except ValueError:
@@ -90,11 +110,16 @@ class NetworkValidators:
             # Typical datacenter subnets: /16 to /31
             # /32 is a host route, not a network
             # /8 to /15 are too large for typical allocations
-            if prefix_len < 16 or prefix_len > 31:
+            #
+            # Note this is now largely defence in depth for direct calls:
+            # validate_segment_format runs first and already rejects anything
+            # wider than the site's /16 pool.
+            if prefix_len < SubnetConstraints.MIN_PREFIX_LENGTH or prefix_len > SubnetConstraints.MAX_PREFIX_LENGTH:
                 logger.warning(f"Unusual subnet mask: /{prefix_len}")
                 raise HTTPException(
                     status_code=400,
-                    detail=f"Subnet mask /{prefix_len} is outside supported range (/16 to /31). "
+                    detail=f"Subnet mask /{prefix_len} is outside supported range "
+                           f"(/{SubnetConstraints.MIN_PREFIX_LENGTH} to /{SubnetConstraints.MAX_PREFIX_LENGTH}). "
                            f"Use /16-/24 for large networks, /25-/29 for smaller subnets, "
                            f"or /30-/31 for point-to-point links (RFC 3021)."
                 )

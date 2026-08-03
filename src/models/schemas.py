@@ -10,7 +10,7 @@ class Segment(BaseModel):
     site: str = Field(..., description="Site name (must be one of the configured sites)", examples=["site1"])
     vlan_id: int = Field(ge=1, le=4094, description="VLAN ID (1-4094)", examples=[100])
     epg_name: str = Field(..., description="Endpoint Group name", examples=["EPG_PROD_01"])
-    segment: str = Field(..., description="Network segment in CIDR notation (must match site IP prefix)", examples=["192.168.1.0/24"])
+    segment: str = Field(..., description="Network segment in CIDR notation (must fall inside the site's configured pool)", examples=["192.10.1.0/24"])
     dhcp: bool = Field(default=True, description="Enable DHCP for this segment")
     cluster_name: Optional[str] = Field(default=None, description="Cluster name if allocated, None if available", examples=["cluster-prod-01"])
     allocated_at: Optional[datetime] = Field(default=None, description="Timestamp when segment was allocated")

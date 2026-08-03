@@ -53,7 +53,7 @@ pip install -r requirements.txt
 
 # Configure environment
 cp .env.example .env
-# Edit .env: MONGODB_URL, SITE_PREFIXES
+# Edit .env: MONGODB_URL, SITE_NETWORKS
 
 # Run
 python main.py           # http://localhost:8000
@@ -75,8 +75,13 @@ podman run -d --name segments-manager -p 8000:8000 --env-file .env segments-mana
 ```bash
 helm install segments-manager deploy/helm \
   --set mongodb.url="mongodb+srv://user:pass@cluster/..." \
-  --set config.sitePrefixes="site1:192,site2:193,site3:194"
+  --set-json siteNetworks='{"site1": {"pool": "192.10.0.0/16", "bmc": "10.50.0.0/16"}}'
 ```
+
+In the cluster you do not set `siteNetworks` per service: it is defined once in
+`redbull-platform` (`gitops/values/<env>.yaml`) and merged into every chart that
+needs it, so segments-manager and segment-connectivity cannot disagree about the
+site list. The `--set-json` form above is for standalone installs.
 
 Use `--set mongodb.existingSecret=<name>` to source `MONGODB_URL` from an existing Secret instead.
 
@@ -91,9 +96,12 @@ Use `--set mongodb.existingSecret=<name>` to source `MONGODB_URL` from an existi
 MONGODB_URL=mongodb://localhost:27017        # or mongodb+srv://... for Atlas
 MONGODB_DB_NAME=segments_manager                 # optional (default: segments_manager)
 
-# Sites (Required) — the single source of truth for configured sites,
-# formatted as site:first-octet. The list of sites is derived from its keys.
-SITE_PREFIXES=site1:192,site2:193,site3:194
+# Sites (Required) — the single source of truth for configured sites. JSON
+# keyed by site name; the list of sites is derived from its keys.
+#   pool  the CIDR every segment at that site must fall INSIDE
+#   bmc   the site's out-of-band management network. Optional, never read
+#         per-request; used only at startup to verify no pool collides with it.
+SITE_NETWORKS={"site1": {"pool": "192.10.0.0/16", "bmc": "10.50.0.0/16"}, "site2": {"pool": "193.51.0.0/16", "bmc": "10.51.0.0/16"}, "site3": {"pool": "194.52.0.0/16", "bmc": "10.52.0.0/16"}}
 
 # Server (Optional)
 SERVER_HOST=0.0.0.0
@@ -104,7 +112,7 @@ LOG_LEVEL=INFO
 API_TOKEN=change-me-to-a-long-random-secret   # REQUIRED — the only credential for write requests
 ```
 
-**Fail-fast validation**: the app crashes at startup if `MONGODB_URL` or `API_TOKEN` is unset, or if `SITE_PREFIXES` is empty/unset.
+**Fail-fast validation**: the app crashes at startup if `MONGODB_URL` or `API_TOKEN` is unset, or if `SITE_NETWORKS` is missing, malformed, has a site without a `pool`, or defines pools that overlap each other or a BMC network. It also refuses to start if the superseded `SITE_PREFIXES` is set while `SITE_NETWORKS` is not — that combination means new code against a stale config.
 
 ---
 

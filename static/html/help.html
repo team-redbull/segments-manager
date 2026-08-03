@@ -76,11 +76,11 @@
             </h2>
 
             <h3>Sites</h3>
-            <p>The system manages three sites, each with a required IP prefix:</p>
+            <p>The system manages three sites, each allocated its own network pool. Every segment must fall entirely inside its site's pool:</p>
             <ul>
-                <li><strong>site1</strong> — segments must start with <code>192.x.x.x</code></li>
-                <li><strong>site2</strong> — segments must start with <code>193.x.x.x</code></li>
-                <li><strong>site3</strong> — segments must start with <code>194.x.x.x</code></li>
+                <li><strong>site1</strong> — segments must be inside <code>192.10.0.0/16</code></li>
+                <li><strong>site2</strong> — segments must be inside <code>193.51.0.0/16</code></li>
+                <li><strong>site3</strong> — segments must be inside <code>194.52.0.0/16</code></li>
             </ul>
 
             <h3>Segment types</h3>
@@ -392,9 +392,9 @@ curl "http://localhost:8000/api/segments/search?q=cluster&site=site1&allocated=t
             <p><strong>Error:</strong> "VLAN X already exists for site Y"</p>
             <p><strong>Solution:</strong> Each VLAN ID must be unique within a site. Choose a different VLAN ID or edit the existing segment.</p>
 
-            <h4>Invalid IP prefix</h4>
-            <p><strong>Error:</strong> "Invalid IP prefix for site. Expected to start with X"</p>
-            <p><strong>Solution:</strong> Ensure your segment starts with the correct prefix — site1: <code>192.x.x.x</code>, site2: <code>193.x.x.x</code>, site3: <code>194.x.x.x</code>.</p>
+            <h4>Segment outside the site's pool</h4>
+            <p><strong>Error:</strong> "Segment X is outside site Y network pool Z"</p>
+            <p><strong>Solution:</strong> Every segment must fall entirely inside its site's pool — site1: <code>192.10.0.0/16</code>, site2: <code>193.51.0.0/16</code>, site3: <code>194.52.0.0/16</code>. The error names the expected pool; pick a subnet inside it.</p>
 
             <h4>No available segments</h4>
             <p><strong>Error:</strong> "No available segments"</p>

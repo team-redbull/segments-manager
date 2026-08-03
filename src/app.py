@@ -5,7 +5,7 @@ from fastapi.responses import HTMLResponse, Response, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 
-from .config.settings import setup_logging, SITES, validate_site_prefixes
+from .config.settings import setup_logging, SITES, validate_site_networks
 from .api.routes import router
 from .database import init_storage, close_storage
 from .auth.auth import is_authenticated
@@ -18,10 +18,10 @@ logger = setup_logging()
 async def lifespan(app: FastAPI):
     # Startup
     try:
-        # Validate site prefixes configuration before anything else
-        logger.info("Validating site prefixes configuration...")
-        validate_site_prefixes()
-        logger.info("Site prefixes validation passed")
+        # Validate site network configuration before anything else
+        logger.info("Validating site networks configuration...")
+        validate_site_networks()
+        logger.info("Site networks validation passed")
 
         await init_storage()
         logger.info(f"MongoDB storage initialized. Managing sites: {SITES}")

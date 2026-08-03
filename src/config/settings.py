@@ -1,5 +1,7 @@
 import os
+import json
 import logging
+import ipaddress
 import sys
 
 from dotenv import load_dotenv
@@ -40,61 +42,247 @@ if not MONGODB_URL:
 # whole lifecycle. This service is a plain dependency of that workflow and
 # triggers nothing.
 
-# Site IP Prefix Configuration — the single source of truth for configured
-# sites. SITES is derived from its keys rather than being its own env var,
-# so the two can never drift out of sync.
-# Format: "site1:192,site2:193,site3:194"
-SITE_PREFIXES_ENV = os.getenv("SITE_PREFIXES", "")
+# Site Network Configuration — the single source of truth for configured sites.
+# SITES is derived from its keys rather than being its own env var, so the two
+# can never drift out of sync.
+#
+# JSON object keyed by site name:
+#   {"site1": {"pool": "192.10.0.0/16", "bmc": "10.50.0.0/16"}, ...}
+#
+#   pool  the /16 (or narrower) every segment at that site must fall INSIDE.
+#         Read on every create — see NetworkValidators.validate_segment_format.
+#   bmc   the site's static out-of-band management network. This service never
+#         reads it per-request; it exists here only so startup can check that no
+#         pool collides with a management network. The segment-connectivity
+#         workflow is the component that actually uses it (firewall rules).
+#
+# The same structure is defined ONCE in redbull-platform
+# (gitops/values/<env>.yaml, key `siteNetworks`) and rendered into both this
+# service's ConfigMap and segment-connectivity's. Sub-keys this service does not
+# recognise are ignored on purpose — another consumer may own them.
+SITE_NETWORKS_ENV = os.getenv("SITE_NETWORKS", "")
+
+# Superseded by SITE_NETWORKS. Read only to detect a stale ConfigMap; never used.
+_LEGACY_SITE_PREFIXES_ENV = os.getenv("SITE_PREFIXES", "")
+
+_SITE_NETWORKS_EXAMPLE = (
+    'SITE_NETWORKS=\'{"site1": {"pool": "192.10.0.0/16", "bmc": "10.50.0.0/16"}, '
+    '"site2": {"pool": "193.51.0.0/16", "bmc": "10.51.0.0/16"}}\''
+)
 
 
-def parse_site_prefixes(site_prefixes_str: str) -> dict:
-    """Parse site prefixes from environment variable.
+def parse_site_networks(raw: str):
+    """Parse and validate the SITE_NETWORKS JSON topology.
 
-    Format: "site1:192,site2:193,site3:194"
-    Returns: {"site1": "192", "site2": "193", ...}
+    Returns (networks, pools, errors). Never raises — every problem is appended
+    to `errors` so startup can report all of them at once. The raise happens in
+    validate_site_networks(), not at import: src/app.py already has a
+    validate-then-log lifespan, and raising here would make this module
+    un-importable (breaking tests and any tooling that reads settings).
+
+    networks  {site: {sub-key: raw value}} — the untouched parsed JSON per site
+    pools     {site: IPv4Network} — parsed once here so request validation does
+              no re-parsing
     """
-    prefixes = {}
-    if not site_prefixes_str:
-        return prefixes
-    for pair in site_prefixes_str.split(","):
-        if ":" in pair:
-            site, prefix = pair.strip().split(":", 1)
-            prefixes[site.strip()] = prefix.strip()
-    return prefixes
+    networks: dict = {}
+    pools: dict = {}
+    errors: list = []
+
+    if not raw.strip():
+        errors.append("SITE_NETWORKS is not set")
+        return networks, pools, errors
+
+    try:
+        parsed = json.loads(raw)
+    except ValueError as e:
+        errors.append(f"SITE_NETWORKS is not valid JSON: {e}")
+        # The old format is a comma/colon string, not JSON. Say so explicitly —
+        # otherwise a half-migrated ConfigMap just looks like a typo.
+        if ":" in raw and "{" not in raw:
+            errors.append(
+                "the value looks like the legacy SITE_PREFIXES format "
+                '("site1:192,site2:193"). It was replaced by the JSON topology below.'
+            )
+        return networks, pools, errors
+
+    if not isinstance(parsed, dict) or not parsed:
+        errors.append("SITE_NETWORKS must be a non-empty JSON object keyed by site name")
+        return networks, pools, errors
+
+    seen_lower: dict = {}
+    for site, value in parsed.items():
+        if not site or not site.strip():
+            errors.append("SITE_NETWORKS contains an empty site name")
+            continue
+
+        # Site lookup is case-insensitive (see resolve_site), so two names that
+        # differ only in case would make it ambiguous which one wins.
+        lower = site.lower()
+        if lower in seen_lower:
+            errors.append(
+                f"sites '{seen_lower[lower]}' and '{site}' differ only by case; "
+                f"site lookup is case-insensitive"
+            )
+            continue
+        seen_lower[lower] = site
+
+        if not isinstance(value, dict):
+            errors.append(
+                f"site '{site}' maps to a {type(value).__name__}, expected an object "
+                f'with a "pool" key'
+            )
+            continue
+        if "pool" not in value:
+            errors.append(f'site \'{site}\' has no "pool" key')
+            continue
+
+        pool = _parse_cidr(site, "pool", value["pool"], errors)
+        if pool is not None:
+            pools[site] = pool
+        # bmc is optional; parsed only to validate it and to check disjointness.
+        if "bmc" in value:
+            _parse_cidr(site, "bmc", value["bmc"], errors)
+
+        networks[site] = value
+
+    errors.extend(_find_overlaps(parsed, pools))
+    return networks, pools, errors
 
 
-SITE_IP_PREFIXES = parse_site_prefixes(SITE_PREFIXES_ENV)
-SITES = list(SITE_IP_PREFIXES.keys())
+def _parse_cidr(site: str, key: str, value, errors: list):
+    """Parse one CIDR sub-key, appending a specific message on failure."""
+    try:
+        # strict=True: "192.10.0.1/16" is an operator error, not something to
+        # silently normalise away — the config should say what it means.
+        network = ipaddress.ip_network(value, strict=True)
+    except (ValueError, TypeError) as e:
+        errors.append(f"site '{site}': invalid {key} CIDR {value!r}: {e}")
+        return None
+    if network.version != 4:
+        # The rest of the validation stack is IPv4-only (see the octet handling
+        # in NetworkValidators.validate_no_reserved_ips).
+        errors.append(f"site '{site}': {key} must be IPv4, got {value!r}")
+        return None
+    return network
 
 
-def validate_site_prefixes():
-    """Validate that at least one site is configured. Fail fast at startup."""
-    if not SITE_IP_PREFIXES:
+def _find_overlaps(parsed: dict, pools: dict) -> list:
+    """Check that no pool overlaps another pool or any site's BMC network.
+
+    Two overlapping pools would make site containment ambiguous. A pool
+    overlapping a BMC network means segments would be allocated on top of an
+    out-of-band management network. Neither is detectable anywhere else: request
+    validation checks containment first, and pools are disjoint from the BMC
+    ranges by design, so no segment that passes containment can ever reach a BMC
+    conflict. Startup is the only place these can be caught.
+    """
+    errors = []
+    sites = list(pools)
+
+    for i, site_a in enumerate(sites):
+        for site_b in sites[i + 1:]:
+            if pools[site_a].overlaps(pools[site_b]):
+                errors.append(
+                    f"site '{site_a}' pool {pools[site_a]} overlaps "
+                    f"site '{site_b}' pool {pools[site_b]}"
+                )
+
+    for bmc_site, value in parsed.items():
+        if not isinstance(value, dict) or "bmc" not in value:
+            continue
+        try:
+            bmc = ipaddress.ip_network(value["bmc"], strict=True)
+        except (ValueError, TypeError):
+            continue  # already reported by _parse_cidr
+        for pool_site, pool in pools.items():
+            if pool.overlaps(bmc):
+                errors.append(
+                    f"site '{pool_site}' pool {pool} overlaps site "
+                    f"'{bmc_site}' BMC network {bmc}"
+                )
+    return errors
+
+
+SITE_NETWORKS, SITE_POOLS, _SITE_NETWORKS_ERRORS = parse_site_networks(SITE_NETWORKS_ENV)
+SITES = list(SITE_NETWORKS.keys())
+
+
+def validate_site_networks():
+    """Validate the site topology. Fail fast at startup."""
+    # New code against a stale ConfigMap. Fail rather than start with no sites —
+    # the alternative is a Healthy pod that rejects every create.
+    if _LEGACY_SITE_PREFIXES_ENV and not SITE_NETWORKS_ENV.strip():
         error_msg = (
-            "CRITICAL CONFIGURATION ERROR: No site IP prefixes configured!\n"
-            "Please set SITE_PREFIXES environment variable.\n"
-            "Example: SITE_PREFIXES=\"site1:192,site2:193,site3:194\""
+            "CRITICAL CONFIGURATION ERROR: SITE_PREFIXES is set but SITE_NETWORKS is not.\n"
+            "SITE_PREFIXES was replaced by SITE_NETWORKS (a JSON site topology) and is\n"
+            "no longer read. This process is running new code against a stale config.\n"
+            f"{_SITE_NETWORKS_EXAMPLE}\n"
+            "In the cluster the value is defined once in redbull-platform\n"
+            "(gitops/values/<env>.yaml, key `siteNetworks`) and rendered into this\n"
+            "service's ConfigMap by helm-charts-segments-manager."
         )
         print(f"ERROR: {error_msg}", file=sys.stderr)
         raise ValueError(error_msg)
 
-    print(f"INFO: Site IP prefixes validated for sites: {SITES}", file=sys.stderr)
+    if _SITE_NETWORKS_ERRORS:
+        error_msg = (
+            "CRITICAL CONFIGURATION ERROR: SITE_NETWORKS is invalid!\n"
+            + "\n".join(f"  - {e}" for e in _SITE_NETWORKS_ERRORS)
+            + f"\n{_SITE_NETWORKS_EXAMPLE}"
+        )
+        print(f"ERROR: {error_msg}", file=sys.stderr)
+        raise ValueError(error_msg)
+
+    # Both set is the expand/contract rollout window: the ConfigMap carries the
+    # old key and the new one while images roll. Warn, don't fail.
+    if _LEGACY_SITE_PREFIXES_ENV:
+        print(
+            "WARNING: SITE_PREFIXES is set and IGNORED (superseded by SITE_NETWORKS). "
+            "Remove it from the ConfigMap once every replica is on the new image.",
+            file=sys.stderr,
+        )
+
+    summary = ", ".join(f"{site}={pool}" for site, pool in SITE_POOLS.items())
+    print(f"INFO: Site networks validated: {summary}", file=sys.stderr)
+
+    # A typo'd sub-key (e.g. "bcm") is silently ignored here but crash-loops the
+    # segment-connectivity worker, which requires it. Surface it in this log too.
+    for site, value in SITE_NETWORKS.items():
+        unknown = sorted(set(value) - {"pool", "bmc"})
+        if unknown:
+            print(
+                f"INFO: site '{site}' has unrecognised SITE_NETWORKS sub-keys "
+                f"{unknown} (ignored by this service)",
+                file=sys.stderr,
+            )
 
 
-def get_site_prefix(site: str) -> str:
-    """Get the IP prefix for a given site.
+def resolve_site(site: str):
+    """Return the canonical configured name for `site`, or None if unknown.
 
-    Returns the prefix string (e.g. "192") or None if not found.
+    Lookup is case-insensitive. This is the one place that rule lives — both
+    InputValidators.validate_site and the pool lookup go through it, so a
+    request for "Site1" cannot pass one and fail the other.
     """
-    prefix = SITE_IP_PREFIXES.get(site)
-    if prefix:
-        return prefix
-    # Case-insensitive fallback
+    if site in SITE_NETWORKS:
+        return site
     site_lower = site.lower()
-    for key, val in SITE_IP_PREFIXES.items():
+    for key in SITE_NETWORKS:
         if key.lower() == site_lower:
-            return val
+            return key
     return None
+
+
+def get_site_pool(site: str):
+    """Return the site's allocatable pool as an IPv4Network, or None if unknown."""
+    canonical = resolve_site(site)
+    return SITE_POOLS.get(canonical) if canonical else None
+
+
+def get_site_networks(site: str):
+    """Return the site's raw topology dict (pool, bmc, ...), or None if unknown."""
+    canonical = resolve_site(site)
+    return SITE_NETWORKS.get(canonical) if canonical else None
 
 
 # Logging Configuration

@@ -9,12 +9,15 @@ container image). Configure the target with environment variables:
                                 then "test-token")
 
 The suite assumes the server is configured with:
-    SITE_PREFIXES=site1:192,site2:193,site3:194
+    SITE_NETWORKS={"site1": {"pool": "192.10.0.0/16", "bmc": "10.50.0.0/16"},
+                   "site2": {"pool": "193.51.0.0/16", "bmc": "10.51.0.0/16"},
+                   "site3": {"pool": "194.52.0.0/16", "bmc": "10.52.0.0/16"}}
     API_TOKEN=test-token   (or match SEGMENTS_MANAGER_API_TOKEN)
 """
 
 import os
 import random
+import ipaddress
 import itertools
 
 import pytest
@@ -26,8 +29,12 @@ API_TOKEN = os.getenv("SEGMENTS_MANAGER_API_TOKEN") or os.getenv("API_TOKEN", "t
 AUTH_HEADERS = {"Authorization": f"Bearer {API_TOKEN}"}
 TIMEOUT = 15
 
-# First IP octet per site (must match the server's SITE_PREFIXES config).
-SITE_OCTET = {"site1": "192", "site2": "193", "site3": "194"}
+# Allocatable pool per site (must match the server's SITE_NETWORKS config).
+SITE_POOL = {
+    "site1": "192.10.0.0/16",
+    "site2": "193.51.0.0/16",
+    "site3": "194.52.0.0/16",
+}
 
 # Randomized, monotonic VLAN IDs in a high band to avoid colliding with
 # any real data. Each id maps 1:1 to a unique CIDR (see cidr_for).
@@ -40,8 +47,15 @@ def next_vlan() -> int:
 
 
 def cidr_for(site: str, vlan: int) -> str:
-    """Deterministic, globally-unique CIDR that matches the site's IP prefix."""
-    return f"{SITE_OCTET[site]}.{vlan // 256}.{vlan % 256}.0/24"
+    """Deterministic /24 carved out of the site's configured pool.
+
+    A /16 pool holds exactly 256 /24s, so the VLAN maps onto the third octet.
+    Two VLANs exactly 256 apart would collide, but next_vlan() hands out
+    consecutive ids, so a session stays unique for its first 256 segments —
+    well above what this suite creates.
+    """
+    pool = ipaddress.ip_network(SITE_POOL[site])
+    return str(ipaddress.IPv4Network((int(pool.network_address) + (vlan % 256) * 256, 24)))
 
 
 @pytest.fixture(scope="session", autouse=True)

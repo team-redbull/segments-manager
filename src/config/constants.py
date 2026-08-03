@@ -20,10 +20,12 @@ class VLANConstraints:
 
 
 class SubnetConstraints:
-    """Subnet mask constraints"""
+    """Subnet mask constraints. Enforced by NetworkValidators.validate_subnet_mask."""
+    # /16 mirrors the widest supported site pool: a segment can at most fill its
+    # site's whole pool, so nothing larger can pass containment anyway.
     MIN_PREFIX_LENGTH = 16   # /16 - Largest allowed subnet
-    MAX_PREFIX_LENGTH = 29   # /29 - Smallest practical subnet
-    MIN_ADDRESSES = 4        # Minimum addresses for a usable network
+    MAX_PREFIX_LENGTH = 31   # /31 - Smallest allowed (point-to-point, RFC 3021)
+    MIN_ADDRESSES = 2        # Minimum addresses for a usable network
 
 
 class FieldLengths:
