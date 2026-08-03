@@ -65,8 +65,6 @@ class AllocationUtils:
             "status": STATUS_ALLOCATED,
             "cluster_name": cluster_name,
             "allocated_at": allocation_time,
-            "released": False,
-            "released_at": None
         })
 
     @staticmethod
@@ -91,8 +89,6 @@ class AllocationUtils:
             return await _update_segment(segment["_id"], {
                 "status": STATUS_AVAILABLE,
                 "cluster_name": None,
-                "released": True,
-                "released_at": get_current_utc()
             })
 
         # Shared cluster — remove only this cluster
@@ -103,8 +99,6 @@ class AllocationUtils:
                 return await _update_segment(segment["_id"], {
                     "status": STATUS_AVAILABLE,
                     "cluster_name": None,
-                    "released": True,
-                    "released_at": get_current_utc()
                 })
             else:
                 return await _update_segment(segment["_id"], {

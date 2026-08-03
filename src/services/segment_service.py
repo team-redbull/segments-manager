@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import Optional, List, Dict, Any
 from fastapi import HTTPException
 
-from ..database import STATUS_LOCKED, STATUS_AVAILABLE
+from ..database import STATUS_LOCKED, STATUS_AVAILABLE, STATUS_ALLOCATED
 from ..models.schemas import Segment
 from ..utils.database_utils import DatabaseUtils
 from ..utils.validators import Validators
@@ -154,7 +154,6 @@ class SegmentService:
     @log_operation_timing("update_segment_clusters", threshold_ms=2000)
     async def update_segment_clusters(segment_value: str, cluster_names: str) -> Dict[str, str]:
         """Update cluster assignment for a segment (for shared segments)"""
-        from datetime import datetime, timezone
         logger.info(f"Updating cluster assignment for segment: {segment_value}")
 
         existing_segment = await SegmentService._get_segment_or_404(segment_value)
@@ -162,27 +161,27 @@ class SegmentService:
 
         clean_cluster_names = cluster_names.strip() if cluster_names else None
 
-        update_data = {}
+        validated_clusters = []
         if clean_cluster_names:
-            cluster_list = [name.strip() for name in clean_cluster_names.split(",")]
-            validated_clusters = []
-            for cluster in cluster_list:
+            for cluster in clean_cluster_names.split(","):
+                cluster = cluster.strip()
                 if cluster and cluster.replace("-", "").replace("_", "").isalnum():
                     validated_clusters.append(cluster)
 
-            if validated_clusters:
-                update_data["cluster_name"] = ",".join(validated_clusters)
-                update_data["allocated_at"] = datetime.now(timezone.utc)
-                update_data["released"] = False
-                update_data["released_at"] = None
-            else:
-                update_data["cluster_name"] = None
-                update_data["released"] = True
-                update_data["released_at"] = datetime.now(timezone.utc)
+        if validated_clusters:
+            update_data = {
+                "cluster_name": ",".join(validated_clusters),
+                "allocated_at": get_current_utc(),
+            }
         else:
-            update_data["cluster_name"] = None
-            update_data["released"] = True
-            update_data["released_at"] = datetime.now(timezone.utc)
+            update_data = {"cluster_name": None}
+
+        # Keep `status` consistent with the cluster assignment — an edit here is
+        # an allocation change like any other. A Locked segment stays Locked:
+        # only the orchestrator's unlock step (POST /api/segments/unlock) may
+        # leave that state, and the lifecycle is one-way from there.
+        if existing_segment.get("status") != STATUS_LOCKED:
+            update_data["status"] = STATUS_ALLOCATED if validated_clusters else STATUS_AVAILABLE
 
         success = await DatabaseUtils.update_segment_by_id(segment_id, update_data)
 

@@ -178,10 +178,11 @@ Collection: **`segments`**
     "segment":      str,             # CIDR, e.g. "192.168.1.0/24" — the natural key (unique + immutable)
     "dhcp":         bool,            # defaults to True on creation; the ONLY mutable field (PATCH /api/segments)
     "cluster_name": str | None,      # None = available; comma-separated for shared segments
-    "allocated_at": datetime | None,
-    "released":     bool,
-    "released_at":  datetime | None,
-    "status":       str,             # "Locked" | "Available" | "Allocated" — server-managed lifecycle
+    "allocated_at": datetime | None, # set on allocation; returned by the allocation API
+    "status":       str,             # "Locked" | "Available" | "Allocated" — server-managed lifecycle,
+                                     # the SOLE record of allocation state (the legacy `released` /
+                                     # `released_at` pair was derivable from it and has been dropped;
+                                     # init_storage() unsets it from existing documents)
     "segment_connectivity_requests": list[int] | None,  # pending firewall request ids shown in the UI beside status;
                                                 # set/cleared by the segment-connectivity orchestrator
                                                 # (PUT /api/segments/segment-connectivity-requests; empty list clears)

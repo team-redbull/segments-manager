@@ -14,8 +14,6 @@ class Segment(BaseModel):
     dhcp: bool = Field(default=True, description="Enable DHCP for this segment")
     cluster_name: Optional[str] = Field(default=None, description="Cluster name if allocated, None if available", examples=["cluster-prod-01"])
     allocated_at: Optional[datetime] = Field(default=None, description="Timestamp when segment was allocated")
-    released: bool = Field(default=False, description="Whether segment was previously released")
-    released_at: Optional[datetime] = Field(default=None, description="Timestamp when segment was released")
 
     model_config = {
         "extra": "forbid",

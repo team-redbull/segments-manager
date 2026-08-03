@@ -54,6 +54,25 @@ async def _migrate_locked_to_status(col) -> None:
         )
 
 
+async def _drop_released_fields(col) -> None:
+    """One-time migration: remove the legacy `released` / `released_at` fields.
+
+    Both predate the `status` lifecycle field and are fully derivable from it
+    (`released` == "Available and previously allocated"), so nothing reads
+    them any more. Must run AFTER _migrate_locked_to_status, which still
+    consults `released` to derive a status for pre-`status` documents.
+    """
+    result = await col.update_many(
+        {"$or": [{"released": {"$exists": True}}, {"released_at": {"$exists": True}}]},
+        {"$unset": {"released": "", "released_at": ""}},
+    )
+    if result.modified_count:
+        logger.info(
+            "Dropped legacy `released`/`released_at` from %d segment(s)",
+            result.modified_count,
+        )
+
+
 async def init_storage() -> None:
     """Connect to MongoDB, ensure all required indexes exist, run migrations."""
     await init_mongo_client()
@@ -71,6 +90,7 @@ async def init_storage() -> None:
     await col.create_index([("site", 1), ("status", 1)], name="site_status_idx")
 
     await _migrate_locked_to_status(col)
+    await _drop_released_fields(col)
 
     logger.info("MongoDB storage initialised — indexes ensured on 'segments' collection")
 

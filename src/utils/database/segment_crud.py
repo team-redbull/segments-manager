@@ -30,8 +30,6 @@ class SegmentCRUD:
             **segment_data,
             "cluster_name": None,
             "allocated_at": None,
-            "released": False,
-            "released_at": None
         }
 
         result = await _create_segment(new_segment)

@@ -37,8 +37,6 @@ class ExportService:
                 'DHCP': 'Yes' if segment.get('dhcp', False) else 'No',
                 'Cluster Name': segment.get('cluster_name', '') if segment.get('cluster_name') else 'Available',
                 'Allocated At': segment.get('allocated_at', ''),
-                'Released': 'Yes' if segment.get('released', False) else 'No',
-                'Released At': segment.get('released_at', ''),
                 'Status': segment.get('status', '')
             })
         return export_data

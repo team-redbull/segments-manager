@@ -118,8 +118,6 @@ async def create_segment(document: Dict[str, Any]) -> Dict[str, Any]:
     doc.setdefault("dhcp", True)
     doc.setdefault("cluster_name", None)
     doc.setdefault("allocated_at", None)
-    doc.setdefault("released", False)
-    doc.setdefault("released_at", None)
     # New segments start in the "Locked" lifecycle status (firewall rules not
     # yet open) until an external service unlocks them via
     # POST /segments/unlock (keyed by the segment CIDR). Lifecycle:
@@ -180,8 +178,6 @@ async def allocate_segment(
             "status": STATUS_ALLOCATED,
             "cluster_name": cluster_name,
             "allocated_at": datetime.now(timezone.utc),
-            "released": False,
-            "released_at": None,
         }
     }
 

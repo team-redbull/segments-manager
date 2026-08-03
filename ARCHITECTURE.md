@@ -97,8 +97,6 @@ Collection **`segments`**:
 | `description` | str | |
 | `cluster_name` | str \| None | `None` = available; comma-separated = shared |
 | `allocated_at` | datetime \| None | |
-| `released` | bool | |
-| `released_at` | datetime \| None | |
 
 **Indexes** (`init_storage()`):
 - `unique({site, vlan_id})` — one VLAN ID per site
@@ -124,8 +122,8 @@ POST /api/allocate-vlan {cluster_name, site} → AllocationService.allocate_vlan
   → find_existing_allocation()  (idempotent short-circuit)
   → find_and_allocate_segment() → allocate_segment():
         find_one_and_update(
-          {site, cluster_name: None},
-          {$set: {cluster_name, allocated_at, released:false}},
+          {site, status: "Available"},
+          {$set: {status: "Allocated", cluster_name, allocated_at}},
           sort=[(vlan_id, 1)], return_document=AFTER)
 ```
 `find_one_and_update` makes allocation a single atomic operation — concurrent requests can never be handed the same segment.

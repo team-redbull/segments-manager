@@ -181,9 +181,7 @@ Collection `segments`:
   "segment": "192.168.1.0/24",
   "dhcp": true,
   "cluster_name": null,
-  "allocated_at": null,
-  "released": false,
-  "released_at": null
+  "allocated_at": null
 }
 ```
 
