@@ -12,8 +12,10 @@ from ...config.settings import SITES
 logger = logging.getLogger(__name__)
 
 # Segment types surfaced in the per-site usage breakdown, in display order.
-# PXE is intentionally excluded from this view.
-DISPLAY_TYPES = ["HC", "MCE", "INVENTORY"]
+# Every SegmentType is listed: a type missing here is silently absent from the
+# site cards while its segments still exist, so the cards under-report the
+# site's real segment count.
+DISPLAY_TYPES = ["HC", "MCE", "INVENTORY", "PXE"]
 
 
 class StatisticsUtils:

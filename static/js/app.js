@@ -595,7 +595,7 @@ function typeClass(type) {
 function renderTypeUsage(stat) {
     const types = (stat.by_type || []).filter((t) => Number(t.total) > 0);
     if (types.length === 0) {
-        return '<div class="types-empty">No HC / MCE / INVENTORY segments</div>';
+        return '<div class="types-empty">No HC / MCE / INVENTORY / PXE segments</div>';
     }
     const rows = types
         .map((t) => {
