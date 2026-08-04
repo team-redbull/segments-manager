@@ -62,8 +62,8 @@ class TestAuthRequired:
         assert requests.post(f"{API}/segments", json=body, timeout=TIMEOUT).status_code == 401
 
     def test_allocate_requires_auth(self):
-        body = {"cluster_name": "noauth-cluster", "site": "site1"}
-        assert requests.post(f"{API}/allocate-segment", json=body, timeout=TIMEOUT).status_code == 401
+        body = {"cluster_name": "noauth-cluster", "site": "site1", "type": "HC"}
+        assert requests.post(f"{API}/segments/allocate", json=body, timeout=TIMEOUT).status_code == 401
 
     def test_delete_requires_auth(self):
         assert requests.delete(f"{API}/segments", params={"segment": "10.99.99.0/24"},
@@ -317,42 +317,135 @@ class TestPerSiteUniqueness:
 # Allocation
 # ---------------------------------------------------------------------------
 class TestAllocation:
-    def test_allocate_idempotent_release(self, segment_factory, release_cluster):
+    def test_allocate_idempotent_release(self, segment_factory, release_allocated):
         # Seed an available segment at site1
         v = next_vlan()
         seg = cidr_for("site1", v)
         assert segment_factory(site="site1", vlan_id=v, epg_name=_uid(), segment=seg).status_code == 200
 
         cluster = f"it-cluster-{uuid.uuid4().hex[:6]}"
-        release_cluster(cluster, "site1")
 
-        a1 = requests.post(f"{API}/allocate-segment",
-                           json={"cluster_name": cluster, "site": "site1"},
+        a1 = requests.post(f"{API}/segments/allocate",
+                           json={"cluster_name": cluster, "site": "site1", "type": "HC"},
                            headers=AUTH_HEADERS, timeout=TIMEOUT)
         assert a1.status_code == 200, a1.text
         data = a1.json()
+        release_allocated(data["segment"])
         assert "vlan_id" in data
+        assert data["type"] == "HC"
         assert "vrf" not in data
 
         # idempotent: re-allocating the same cluster returns the same VLAN
-        a2 = requests.post(f"{API}/allocate-segment",
-                           json={"cluster_name": cluster, "site": "site1"},
+        a2 = requests.post(f"{API}/segments/allocate",
+                           json={"cluster_name": cluster, "site": "site1", "type": "HC"},
                            headers=AUTH_HEADERS, timeout=TIMEOUT)
         assert a2.status_code == 200
         assert a2.json()["vlan_id"] == data["vlan_id"]
 
-        # release
-        rel = requests.post(f"{API}/release-segment",
-                            json={"cluster_name": cluster, "site": "site1"},
+        # release is keyed by the CIDR alone — same shape as unlock
+        rel = requests.post(f"{API}/segments/release",
+                            json={"segment": data["segment"]},
                             headers=AUTH_HEADERS, timeout=TIMEOUT)
         assert rel.status_code == 200
         assert "released" in rel.text.lower()
 
-    def test_release_unknown_cluster_404(self):
-        r = requests.post(f"{API}/release-segment",
-                          json={"cluster_name": f"nope-{uuid.uuid4().hex[:6]}", "site": "site1"},
+        got = requests.get(f"{API}/segments/by-segment",
+                           params={"segment": data["segment"]}, timeout=TIMEOUT).json()
+        assert got["status"] == "Available"
+        assert got["cluster_name"] is None
+
+    def test_release_unknown_segment_404(self):
+        r = requests.post(f"{API}/segments/release",
+                          json={"segment": "10.255.253.0/24"},
                           headers=AUTH_HEADERS, timeout=TIMEOUT)
         assert r.status_code == 404
+
+    def test_release_is_idempotent(self, segment_factory):
+        # Releasing an already-Available segment is a no-op, not an error
+        v = next_vlan()
+        seg = cidr_for("site1", v)
+        assert segment_factory(site="site1", vlan_id=v, epg_name=_uid(), segment=seg).status_code == 200
+
+        for _ in range(2):
+            r = requests.post(f"{API}/segments/release", json={"segment": seg},
+                              headers=AUTH_HEADERS, timeout=TIMEOUT)
+            assert r.status_code == 200, r.text
+
+        got = requests.get(f"{API}/segments/by-segment", params={"segment": seg},
+                           timeout=TIMEOUT).json()
+        assert got["status"] == "Available"
+
+    def test_release_locked_segment_conflicts(self, segment_factory):
+        # A Locked segment was never allocated, so there is nothing to release.
+        # This must be a loud 409, not a silent no-op: a caller releasing the
+        # wrong CIDR should hear about it. It also keeps release from becoming
+        # a second path for Locked -> Available (that is /segments/unlock's job).
+        v = next_vlan()
+        seg = cidr_for("site1", v)
+        assert segment_factory(site="site1", vlan_id=v, epg_name=_uid(), segment=seg,
+                               keep_locked=True).status_code == 200
+
+        r = requests.post(f"{API}/segments/release", json={"segment": seg},
+                          headers=AUTH_HEADERS, timeout=TIMEOUT)
+        assert r.status_code == 409, r.text
+
+        got = requests.get(f"{API}/segments/by-segment", params={"segment": seg},
+                           timeout=TIMEOUT).json()
+        assert got["status"] == "Locked"
+
+    def test_release_frees_a_shared_segment_entirely(self, segment_factory):
+        # Keyed by CIDR there is no single cluster to remove, so release frees
+        # the segment from all of its clusters at once.
+        v = next_vlan()
+        seg = cidr_for("site1", v)
+        assert segment_factory(site="site1", vlan_id=v, epg_name=_uid(), segment=seg).status_code == 200
+
+        share = requests.put(f"{API}/segments/clusters",
+                             json={"segment": seg, "cluster_names": "shared-a,shared-b"},
+                             headers=AUTH_HEADERS, timeout=TIMEOUT)
+        assert share.status_code == 200, share.text
+
+        rel = requests.post(f"{API}/segments/release", json={"segment": seg},
+                            headers=AUTH_HEADERS, timeout=TIMEOUT)
+        assert rel.status_code == 200, rel.text
+
+        got = requests.get(f"{API}/segments/by-segment", params={"segment": seg},
+                           timeout=TIMEOUT).json()
+        assert got["cluster_name"] is None
+        assert got["status"] == "Available"
+
+    def test_allocate_requires_type(self):
+        r = requests.post(f"{API}/segments/allocate",
+                          json={"cluster_name": f"notype-{uuid.uuid4().hex[:6]}", "site": "site1"},
+                          headers=AUTH_HEADERS, timeout=TIMEOUT)
+        assert r.status_code == 422
+
+    def test_release_rejects_everything_but_segment(self):
+        # site/cluster_name/type were all removed from the release body;
+        # extra="forbid" rejects them rather than silently ignoring them.
+        for extra in ({"site": "site1"}, {"cluster_name": "whatever"}, {"type": "HC"}):
+            r = requests.post(f"{API}/segments/release",
+                              json={"segment": "10.255.253.0/24", **extra},
+                              headers=AUTH_HEADERS, timeout=TIMEOUT)
+            assert r.status_code == 422, f"{extra} -> {r.status_code}"
+
+    def test_allocate_only_returns_requested_type(self, segment_factory, release_allocated):
+        # An MCE segment is the only thing available at site2; asking for HC
+        # must not hand it out.
+        v = next_vlan()
+        mce = cidr_for("site2", v)
+        assert segment_factory(type="MCE", site="site2", vlan_id=v,
+                               epg_name=_uid(), segment=mce).status_code == 200
+
+        cluster = f"it-type-{uuid.uuid4().hex[:6]}"
+
+        a = requests.post(f"{API}/segments/allocate",
+                          json={"cluster_name": cluster, "site": "site2", "type": "MCE"},
+                          headers=AUTH_HEADERS, timeout=TIMEOUT)
+        assert a.status_code == 200, a.text
+        release_allocated(a.json()["segment"])
+        assert a.json()["segment"] == mce
+        assert a.json()["type"] == "MCE"
 
 
 # ---------------------------------------------------------------------------
@@ -372,7 +465,7 @@ class TestSegmentLocking:
         assert got.json()["status"] == "Locked"
         assert "locked" not in got.json()  # legacy boolean is gone
 
-    def test_locked_segment_excluded_from_allocation(self, segment_factory, release_cluster):
+    def test_locked_segment_excluded_from_allocation(self, segment_factory, release_allocated):
         # Create one locked segment and confirm the atomic allocator never
         # hands it out — it skips straight past to an unlocked candidate
         # (provisioned here too, so the test is self-sufficient on an empty DB).
@@ -388,15 +481,15 @@ class TestSegmentLocking:
         assert r2.status_code == 200, r2.text
 
         cluster = f"it-locktest-{uuid.uuid4().hex[:6]}"
-        release_cluster(cluster, "site3")
 
-        a1 = requests.post(f"{API}/allocate-segment",
-                           json={"cluster_name": cluster, "site": "site3"},
+        a1 = requests.post(f"{API}/segments/allocate",
+                           json={"cluster_name": cluster, "site": "site3", "type": "HC"},
                            headers=AUTH_HEADERS, timeout=TIMEOUT)
         assert a1.status_code == 200, a1.text
+        release_allocated(a1.json()["segment"])
         assert a1.json()["segment"] != locked_segment_value
 
-    def test_unlock_makes_segment_allocatable(self, segment_factory, release_cluster):
+    def test_unlock_makes_segment_allocatable(self, segment_factory, release_allocated):
         v = next_vlan()
         cidr = cidr_for("site1", v)
         r = segment_factory(site="site1", vlan_id=v, epg_name=_uid(), segment=cidr,
@@ -411,11 +504,11 @@ class TestSegmentLocking:
         assert got.json()["status"] == "Available"
 
         cluster = f"it-unlocktest-{uuid.uuid4().hex[:6]}"
-        release_cluster(cluster, "site1")
-        alloc = requests.post(f"{API}/allocate-segment",
-                              json={"cluster_name": cluster, "site": "site1"},
+        alloc = requests.post(f"{API}/segments/allocate",
+                              json={"cluster_name": cluster, "site": "site1", "type": "HC"},
                               headers=AUTH_HEADERS, timeout=TIMEOUT)
         assert alloc.status_code == 200, alloc.text
+        release_allocated(alloc.json()["segment"])
 
     def test_no_relock_endpoint_exists(self, segment_factory):
         # Segment lifecycle is one-way: Locked -> Available -> Allocated -> Available.
@@ -586,17 +679,17 @@ class TestSegmentConnectivityFailure:
 # ---------------------------------------------------------------------------
 class TestStats:
     def test_stats_shape(self):
-        """GET /api/stats is trimmed to {site, by_type} for the UI site cards.
+        """GET /api/stats is trimmed to {site, total_segments, by_type} for the UI site cards.
 
-        Site-level totals/utilization are still computed by
-        get_all_sites_statistics() but are only exposed via /api/health.
+        Site-level utilization is still computed by get_all_sites_statistics()
+        but is only exposed via /api/health.
         """
         r = requests.get(f"{API}/stats", timeout=TIMEOUT)
         assert r.status_code == 200
         stats = r.json()
         assert isinstance(stats, list) and len(stats) > 0
         s = stats[0]
-        assert set(s) == {"site", "by_type"}
+        assert set(s) == {"site", "total_segments", "by_type"}
         for entry in s["by_type"]:
             assert set(entry) == {"type", "allocated", "total"}
 

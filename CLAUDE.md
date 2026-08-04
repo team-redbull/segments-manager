@@ -16,6 +16,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 > **The segment CIDR is the natural key.** The `segment` field is globally unique (unique index) and immutable, and it is how the API identifies individual segments — reads/deletes take `?segment=<cidr>` as a query parameter, writes carry `segment` in the request body. The Mongo `ObjectId` is internal only; there are no `/api/segments/{id}` routes.
 
+> **Every route lives under the plural `/api/segments`.** That includes the two allocation actions, which replaced the old top-level `/api/allocate-segment` and `/api/release-segment`: `POST /api/segments/allocate` `{cluster_name, site, type}` and `POST /api/segments/release` `{segment}`. Allocate acts on the collection — it picks a member out of the available pool, so it names no CIDR. Release is keyed by the CIDR exactly like `/segments/unlock`, since the CIDR is globally unique; it accepts **no** site, cluster_name or type (`extra="forbid"` rejects them). Release only ever performs `Allocated → Available`: an already-`Available` segment is an idempotent 200, and a `Locked` one is a **409** — nothing was allocated, and release must not become a second path to `Available`. Do not add a singular `/api/segment` prefix.
+
+> **These three are POST, and that is deliberate.** `allocate`, `release` and `unlock` are RPC-style actions whose body only *names the target* (`{segment}`) — the change itself is encoded in the URL verb, not the payload. PUT/PATCH would claim the body is (or patches) a representation of a resource at that URL, but `/api/segments/unlock` serves no representation and cannot be GET. Contrast `PATCH /api/segments` `{segment, dhcp}`, which is correctly PATCH because its body carries the new field value. Do not "fix" these to PUT/PATCH.
+
 ---
 
 ## Development Commands
@@ -192,7 +196,7 @@ Collection: **`segments`**
 }
 ```
 
-> **`type` is one of `MCE`, `INVENTORY`, `HC`, `PXE`**, enforced by a Pydantic `Literal` on the `Segment` model (422 on any other value). Optional — defaults to `"HC"` if omitted on create. It's a plain classifier with no lifecycle logic attached, unlike `status`.
+> **`type` is one of `MCE`, `INVENTORY`, `HC`, `PXE`**, enforced by a Pydantic `Literal` (422 on any other value). Optional on create — defaults to `"HC"` if omitted. **Required** on `POST /api/segments/allocate`: the allocator must never guess which kind of segment a caller wants. (Release does *not* take it — the CIDR already determines the type.) It's a plain classifier with no lifecycle logic attached, unlike `status`.
 
 > **Locked is the default status for new segments.** Lifecycle is one-way: `Locked → Available → Allocated → Available` — a segment can never become locked again via the API (no re-lock endpoint exists). It signals that firewall rules haven't been opened yet. `allocate_segment()` only considers segments with `status: "Available"`. An external service unlocks a segment via `POST /api/segments/unlock` with body `{"segment": "<cidr>"}` once provisioning is done.
 
@@ -203,6 +207,7 @@ Collection: **`segments`**
 - `unique({segment: 1})` — globally unique CIDR
 - `{cluster_name: 1}` — allocation lookups
 - `{site: 1}` — site filtering
+- `{site: 1, type: 1, status: 1}` — the atomic allocator's selector (supersedes the old `{site, status}` index, which `init_storage()` drops)
 
 **ObjectId rule**: `_id` is internal. Outbound segment dicts convert it via `str(...)` (`_doc_to_segment`), but the API never accepts an id — services resolve segments by their CIDR (`get_segment_by_segment`, 404 if unknown) and only then use the resolved `_id` for the Mongo write.
 
@@ -211,10 +216,10 @@ Collection: **`segments`**
 ## Request Flow — Allocating a Segment
 
 ```
-POST /api/allocate-segment  {cluster_name, site}
+POST /api/segments/allocate  {cluster_name, site, type}
     ↓ routes.py → AllocationService.allocate_segment()
     ├─ validators: site, cluster_name
-    ├─ DatabaseUtils.find_existing_allocation()  → idempotent: returns existing allocation if any
+    ├─ DatabaseUtils.find_existing_allocation()  → idempotent per (cluster, site, type)
     └─ DatabaseUtils.find_and_allocate_segment() → allocate_segment() atomic find_one_and_update
     ↓
 Return VLANAllocationResponse

@@ -643,145 +643,114 @@ svg {
     cursor: pointer;
 }
 
-/* ---- Advanced filter builder ("Add filter") -------------------------------- */
-.filter-bar {
-    position: relative;
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-    flex-wrap: wrap;
-}
-
-.filter-pills {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-    flex-wrap: wrap;
-}
-
-.filter-pill {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 5px 6px 5px 10px;
-    background: var(--accent-soft);
-    border-radius: var(--radius-pill);
-    color: var(--primary);
-    font-size: 0.78rem;
-    font-weight: 600;
-    cursor: pointer;
-    max-width: 320px;
-}
-.filter-pill__text {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-.filter-pill__remove {
+/* ---- Per-column header filters (Excel-style) -------------------------------- */
+.col-filter-btn {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 18px;
-    height: 18px;
+    width: 20px;
+    height: 20px;
+    margin-left: 4px;
+    padding: 0;
     border: none;
-    border-radius: 50%;
+    border-radius: var(--radius-sm);
     background: transparent;
-    color: currentColor;
+    color: var(--text-faint);
     cursor: pointer;
     flex-shrink: 0;
-    transition: background var(--dur) var(--ease);
+    transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
 }
-.filter-pill__remove:hover {
-    background: rgba(37, 99, 235, 0.15);
+.col-filter-btn:hover {
+    background: var(--surface-hover);
+    color: var(--text);
+}
+.col-filter-btn:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: -2px;
+}
+.col-filter-btn.is-active {
+    color: var(--primary);
+}
+.col-filter-btn .icon {
+    width: 12px;
+    height: 12px;
 }
 
-.filter-popover {
-    position: absolute;
-    top: calc(100% + 8px);
-    left: 0;
-    z-index: 30;
-    min-width: 620px;
+.col-filter-popover {
+    position: fixed;
+    z-index: var(--z-toast);
+    width: 230px;
     max-width: 90vw;
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
     box-shadow: var(--shadow-lg);
-    padding: var(--space-4);
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-3);
-}
-.filter-popover[hidden] {
-    display: none;
-}
-.filter-popover__title {
-    font-size: 0.72rem;
-    font-weight: 700;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-}
-.filter-popover__rows {
+    padding: var(--space-3);
     display: flex;
     flex-direction: column;
     gap: var(--space-2);
 }
-.filter-row {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-    flex-wrap: wrap;
-}
-.filter-row__combinator {
-    font-size: 0.72rem;
-    font-weight: 700;
-    color: var(--text-faint);
-    width: 30px;
-    flex-shrink: 0;
-    text-transform: uppercase;
-}
-.filter-row__field {
-    flex: 1 1 160px;
-    min-width: 130px;
-}
-.filter-row__operator {
-    flex: 1 1 150px;
-    min-width: 120px;
-}
-.filter-row__value {
-    flex: 1 1 160px;
-    min-width: 130px;
-    height: 40px;
-    padding: 0 12px;
+.col-filter__search {
+    height: 34px;
+    padding: 0 10px;
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     background: var(--surface);
     color: var(--text);
     font-family: inherit;
-    font-size: 0.85rem;
+    font-size: 0.82rem;
     transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
 }
-.filter-row__value:focus {
+.col-filter__search:focus {
     outline: none;
     border-color: var(--primary);
     box-shadow: 0 0 0 3px var(--ring);
 }
-.filter-row__novalue {
-    flex: 1 1 160px;
-    color: var(--text-faint);
-    font-size: 0.85rem;
-}
-.filter-row__remove {
-    flex-shrink: 0;
-    margin-left: auto;
-}
-.filter-popover__add-row {
+.col-filter__list {
+    max-height: 220px;
+    overflow-y: auto;
     display: flex;
+    flex-direction: column;
+    gap: 1px;
+    border-top: 1px solid var(--border);
+    padding-top: var(--space-1);
+}
+.col-filter__item {
+    display: flex;
+    align-items: center;
     gap: var(--space-2);
+    padding: 5px 6px;
+    border-radius: var(--radius-sm);
+    font-size: 0.82rem;
+    font-weight: 500;
+    color: var(--text);
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    transition: background var(--dur) var(--ease);
 }
-.filter-popover__footer {
+.col-filter__item:hover {
+    background: var(--surface-hover);
+}
+.col-filter__item input {
+    width: 15px;
+    height: 15px;
+    accent-color: var(--primary);
+    cursor: pointer;
+    flex-shrink: 0;
+}
+.col-filter__selectall {
+    font-weight: 700;
+}
+.col-filter__empty {
+    font-size: 0.8rem;
+    color: var(--text-faint);
+    padding: var(--space-2) 4px;
+}
+.col-filter__footer {
     display: flex;
-    justify-content: flex-end;
+    justify-content: space-between;
     gap: var(--space-2);
     padding-top: var(--space-2);
     border-top: 1px solid var(--border);
@@ -845,6 +814,10 @@ thead th[data-sort] {
     user-select: none;
     transition: color var(--dur) var(--ease);
 }
+thead th[data-sort] .th-inner {
+    display: inline-flex;
+    align-items: center;
+}
 thead th[data-sort]:hover {
     color: var(--text);
 }
@@ -857,7 +830,7 @@ thead th[data-sort] .sort-icon {
     width: 12px;
     height: 12px;
     margin-left: 4px;
-    vertical-align: -1px;
+    flex-shrink: 0;
     stroke-width: 2.5;
     opacity: 0.3;
     transition: opacity var(--dur) var(--ease), transform var(--dur) var(--ease);
@@ -1756,24 +1729,11 @@ td.copyable:focus-visible .copyable__icon {
     .site-filter {
         width: 100%;
     }
-    .filter-bar {
-        width: 100%;
-    }
-    .filter-popover {
-        left: 0;
-        right: 0;
-        min-width: 0;
-        max-width: none;
+    .col-filter-popover {
+        left: var(--space-3) !important;
+        right: var(--space-3);
         width: auto;
-    }
-    .filter-row {
-        flex-wrap: wrap;
-    }
-    .filter-row__field,
-    .filter-row__operator,
-    .filter-row__value,
-    .filter-row__novalue {
-        flex-basis: 100%;
+        max-width: none;
     }
     .columns-popover {
         right: 0;

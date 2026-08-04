@@ -122,20 +122,26 @@ def segment_factory():
 
 
 @pytest.fixture
-def release_cluster():
-    """Ensure clusters allocated during a test are released afterwards."""
-    allocated = []
+def release_allocated():
+    """Release segments allocated during a test, so segment_factory can delete them.
 
-    def _track(cluster_name, site):
-        allocated.append((cluster_name, site))
+    Release is keyed by the segment CIDR, so tests register the CIDR that the
+    allocator actually handed back rather than the cluster they asked for —
+    the allocator picks from the whole Available pool at a site, which is not
+    necessarily the segment the test just created.
+    """
+    cidrs = []
+
+    def _track(segment):
+        cidrs.append(segment)
 
     yield _track
 
-    for cluster_name, site in allocated:
+    for cidr in cidrs:
         try:
             requests.post(
-                f"{API}/release-segment",
-                json={"cluster_name": cluster_name, "site": site},
+                f"{API}/segments/release",
+                json={"segment": cidr},
                 headers=AUTH_HEADERS,
                 timeout=TIMEOUT,
             )

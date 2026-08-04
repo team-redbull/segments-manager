@@ -53,307 +53,189 @@ function toggleColumn(col, visible) {
     applyColumnVisibility();
 }
 
-// ---- Advanced filter builder ------------------------------------------------
-const FILTER_FIELDS = [
-    {
-        key: "type",
-        label: "Type",
-        type: "select",
-        options: [
-            { value: "MCE", label: "MCE" },
-            { value: "INVENTORY", label: "INVENTORY" },
-            { value: "HC", label: "HC" },
-            { value: "PXE", label: "PXE" },
-        ],
-    },
-    { key: "site", label: "Site", type: "text" },
-    { key: "vlan_id", label: "VLAN ID", type: "number" },
-    { key: "epg_name", label: "EPG Name", type: "text" },
-    { key: "segment", label: "Network Segment", type: "text" },
-    {
-        key: "dhcp",
-        label: "DHCP",
-        type: "select",
-        options: [
-            { value: "true", label: "On" },
-            { value: "false", label: "Off" },
-        ],
-    },
-    { key: "cluster_name", label: "Cluster", type: "text" },
-    {
-        key: "status",
-        label: "Status",
-        type: "select",
-        options: [
-            { value: "locked", label: "Locked" },
-            { value: "allocated", label: "Allocated" },
-            { value: "available", label: "Available" },
-        ],
-    },
-];
+// ---- Per-column header filters (Excel-style) --------------------------------
+const COLUMN_FILTER_LABELS = {
+    type: "Type",
+    site: "Site",
+    vlan_id: "VLAN ID",
+    epg_name: "EPG Name",
+    segment: "Network Segment",
+    dhcp: "DHCP",
+    cluster: "Cluster",
+    status: "Status",
+};
 
-const TEXT_OPERATORS = [
-    { value: "contains", label: "contains" },
-    { value: "not_contains", label: "does not contain" },
-    { value: "is", label: "is" },
-    { value: "is_not", label: "is not" },
-    { value: "is_empty", label: "is empty" },
-    { value: "is_not_empty", label: "is not empty" },
-];
-const NUMBER_OPERATORS = [
-    { value: "eq", label: "=" },
-    { value: "neq", label: "≠" },
-    { value: "gt", label: ">" },
-    { value: "lt", label: "<" },
-    { value: "is_empty", label: "is empty" },
-    { value: "is_not_empty", label: "is not empty" },
-];
-const SELECT_OPERATORS = [
-    { value: "is", label: "is" },
-    { value: "is_not", label: "is not" },
-];
-
-function fieldByKey(key) {
-    return FILTER_FIELDS.find((f) => f.key === key) || FILTER_FIELDS[0];
-}
-
-function operatorsForField(fieldKey) {
-    const field = fieldByKey(fieldKey);
-    if (field.type === "number") return NUMBER_OPERATORS;
-    if (field.type === "select") return SELECT_OPERATORS;
-    return TEXT_OPERATORS;
-}
-
-function newClause(fieldKey) {
-    const field = fieldByKey(fieldKey);
-    const ops = operatorsForField(field.key);
-    return {
-        field: field.key,
-        operator: ops[0].value,
-        value: field.type === "select" ? field.options[0].value : "",
-    };
-}
-
-let filters = []; // [{ id, combinator: "AND"|"OR", clauses: [{field, operator, value}] }]
-let editingFilterId = null;
-let draftClauses = [];
-let draftCombinator = "AND";
-
-function evaluateClauseAgainstSegment(segment, clause) {
-    let raw;
-    if (clause.field === "status") {
-        raw = String(segment.status || "").toLowerCase();
-    } else if (clause.field === "dhcp") {
-        raw = segment.dhcp ? "true" : "false";
-    } else {
-        raw = segment[clause.field];
-    }
-    const hay = String(raw ?? "").toLowerCase();
-    const needle = String(clause.value ?? "").toLowerCase();
-
-    switch (clause.operator) {
-        case "contains":
-            return hay.includes(needle);
-        case "not_contains":
-            return !hay.includes(needle);
-        case "is":
-            return hay === needle;
-        case "is_not":
-            return hay !== needle;
-        case "is_empty":
-            return hay === "";
-        case "is_not_empty":
-            return hay !== "";
-        case "eq":
-            return Number(raw) === Number(clause.value);
-        case "neq":
-            return Number(raw) !== Number(clause.value);
-        case "gt":
-            return Number(raw) > Number(clause.value);
-        case "lt":
-            return Number(raw) < Number(clause.value);
+function columnFilterValue(segment, col) {
+    switch (col) {
+        case "dhcp":
+            return segment.dhcp ? "On" : "Off";
+        case "status":
+            return segmentStatusLabel(segment);
+        case "cluster":
+            return segment.cluster_name || "";
         default:
-            return true;
+            return segment[col] === null || segment[col] === undefined ? "" : String(segment[col]);
     }
 }
 
-function evaluateFilterAgainstSegment(segment, filter) {
-    return filter.clauses.reduce((acc, clause, idx) => {
-        const result = evaluateClauseAgainstSegment(segment, clause);
-        if (idx === 0) return result;
-        return filter.combinator === "OR" ? acc || result : acc && result;
-    }, true);
-}
+let columnFilters = {}; // { [col]: Set<string> } — a Set present means that column is actively filtered
+let lastBaseSegments = []; // segments after search/status/site, before column filters — source for dropdown options
+let openFilterCol = null;
+let filterDraftSelected = null; // Set<string>, uncommitted until OK
+let filterDraftSearch = "";
 
-function segmentPassesFilters(segment) {
-    return filters.every((f) => evaluateFilterAgainstSegment(segment, f));
-}
-
-function renderFilterRow(clause, idx) {
-    const field = fieldByKey(clause.field);
-    const ops = operatorsForField(field.key);
-    const needsValue = clause.operator !== "is_empty" && clause.operator !== "is_not_empty";
-
-    const fieldOptions = FILTER_FIELDS.map(
-        (f) =>
-            `<option value="${f.key}" ${f.key === field.key ? "selected" : ""}>${escapeHTML(
-                f.label
-            )}</option>`
-    ).join("");
-
-    const operatorOptions = ops
-        .map(
-            (o) =>
-                `<option value="${o.value}" ${
-                    o.value === clause.operator ? "selected" : ""
-                }>${escapeHTML(o.label)}</option>`
-        )
-        .join("");
-
-    let valueControl;
-    if (!needsValue) {
-        valueControl = `<span class="filter-row__novalue">—</span>`;
-    } else if (field.type === "select") {
-        const optionsHtml = field.options
-            .map(
-                (o) =>
-                    `<option value="${o.value}" ${
-                        o.value === clause.value ? "selected" : ""
-                    }>${escapeHTML(o.label)}</option>`
-            )
-            .join("");
-        valueControl = `<select class="select filter-row__value" onchange="updateClauseValue(${idx}, this.value)">${optionsHtml}</select>`;
-    } else {
-        valueControl = `<input type="text" class="filter-row__value" placeholder="Value" value="${escapeHTML(
-            clause.value
-        )}" oninput="updateClauseValue(${idx}, this.value)">`;
-    }
-
-    const combinatorBadge =
-        idx > 0 ? `<span class="filter-row__combinator">${draftCombinator}</span>` : "";
-
-    return `
-        <div class="filter-row">
-            ${combinatorBadge}
-            <select class="select filter-row__field" onchange="updateClauseField(${idx}, this.value)">${fieldOptions}</select>
-            <select class="select filter-row__operator" onchange="updateClauseOperator(${idx}, this.value)">${operatorOptions}</select>
-            ${valueControl}
-            <button type="button" class="icon-btn btn btn-ghost filter-row__remove" onclick="removeClause(${idx})" aria-label="Remove condition" title="Remove condition">
-                <svg viewBox="0 0 24 24" class="icon icon-sm"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/></svg>
-            </button>
-        </div>`;
-}
-
-function renderFilterRows() {
-    const rowsContainer = document.getElementById("filterRows");
-    if (!rowsContainer) return;
-    rowsContainer.innerHTML = draftClauses.map((clause, idx) => renderFilterRow(clause, idx)).join("");
-}
-
-window.updateClauseField = function (idx, value) {
-    draftClauses[idx] = newClause(value);
-    renderFilterRows();
-};
-window.updateClauseOperator = function (idx, value) {
-    draftClauses[idx].operator = value;
-    renderFilterRows();
-};
-window.updateClauseValue = function (idx, value) {
-    draftClauses[idx].value = value;
-};
-window.removeClause = function (idx) {
-    draftClauses.splice(idx, 1);
-    if (draftClauses.length === 0) draftClauses.push(newClause("epg_name"));
-    renderFilterRows();
-};
-
-function openFilterPopover(filterId) {
-    editingFilterId = filterId || null;
-    const existing = filterId ? filters.find((f) => f.id === filterId) : null;
-    draftClauses = existing ? existing.clauses.map((c) => ({ ...c })) : [newClause("epg_name")];
-    draftCombinator = existing ? existing.combinator : "AND";
-    renderFilterRows();
-    document.getElementById("filterPopover").hidden = false;
-    document.getElementById("addFilterBtn").setAttribute("aria-expanded", "true");
-}
-
-function closeFilterPopover() {
-    const popover = document.getElementById("filterPopover");
-    if (popover) popover.hidden = true;
-    const btn = document.getElementById("addFilterBtn");
-    if (btn) btn.setAttribute("aria-expanded", "false");
-    editingFilterId = null;
-}
-
-function saveFilter() {
-    const cleanClauses = draftClauses.filter((c) => {
-        if (c.operator === "is_empty" || c.operator === "is_not_empty") return true;
-        return String(c.value ?? "").trim() !== "";
+function segmentPassesColumnFilters(segment) {
+    return Object.keys(columnFilters).every((col) => {
+        const set = columnFilters[col];
+        if (!set) return true;
+        return set.has(columnFilterValue(segment, col));
     });
-
-    if (cleanClauses.length === 0) {
-        closeFilterPopover();
-        return;
-    }
-
-    if (editingFilterId) {
-        const existing = filters.find((f) => f.id === editingFilterId);
-        existing.clauses = cleanClauses;
-        existing.combinator = draftCombinator;
-    } else {
-        filters.push({
-            id: "f" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
-            clauses: cleanClauses,
-            combinator: draftCombinator,
-        });
-    }
-
-    closeFilterPopover();
-    renderFilterPills();
-    loadSegments(true);
 }
 
-window.removeFilter = function (filterId) {
-    filters = filters.filter((f) => f.id !== filterId);
-    renderFilterPills();
-    loadSegments(true);
-};
-
-window.openFilterPopover = openFilterPopover;
-
-function describeClause(clause) {
-    const field = fieldByKey(clause.field);
-    const ops = operatorsForField(clause.field);
-    const opLabel = (ops.find((o) => o.value === clause.operator) || {}).label || clause.operator;
-
-    if (clause.operator === "is_empty" || clause.operator === "is_not_empty") {
-        return `${field.label} ${opLabel}`;
-    }
-
-    let valueLabel = clause.value;
-    if (field.type === "select") {
-        const opt = field.options.find((o) => o.value === clause.value);
-        valueLabel = opt ? opt.label : clause.value;
-    }
-    return `${field.label} ${opLabel} "${valueLabel}"`;
+function columnOptions(col) {
+    const values = new Set();
+    lastBaseSegments.forEach((s) => values.add(columnFilterValue(s, col)));
+    return [...values].sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
 }
 
-function renderFilterPills() {
-    const container = document.getElementById("filterPills");
-    if (!container) return;
-    container.innerHTML = filters
-        .map((f) => {
-            const text = f.clauses.map(describeClause).join(` ${f.combinator} `);
-            return `
-                <span class="filter-pill" onclick="openFilterPopover('${f.id}')" role="button" tabindex="0">
-                    <span class="filter-pill__text">${escapeHTML(text)}</span>
-                    <button type="button" class="filter-pill__remove" onclick="event.stopPropagation(); removeFilter('${f.id}')" aria-label="Remove filter">
-                        <svg viewBox="0 0 24 24" class="icon icon-sm"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-                    </button>
-                </span>`;
+function updateColumnFilterButtonStates() {
+    document.querySelectorAll(".col-filter-btn").forEach((btn) => {
+        const col = btn.getAttribute("data-filter-col");
+        btn.classList.toggle("is-active", !!columnFilters[col]);
+    });
+}
+
+function closeColumnFilterPopover() {
+    const popover = document.getElementById("colFilterPopover");
+    if (popover) popover.remove();
+    if (openFilterCol) {
+        const btn = document.querySelector(`.col-filter-btn[data-filter-col="${openFilterCol}"]`);
+        if (btn) btn.setAttribute("aria-expanded", "false");
+    }
+    openFilterCol = null;
+    filterDraftSelected = null;
+    filterDraftSearch = "";
+}
+
+function renderColumnFilterPopover() {
+    const popover = document.getElementById("colFilterPopover");
+    if (!popover || !openFilterCol) return;
+
+    const options = columnOptions(openFilterCol);
+    const needle = filterDraftSearch.trim().toLowerCase();
+    const visible = needle
+        ? options.filter((v) => (v === "" ? "(blank)" : v.toLowerCase()).includes(needle))
+        : options;
+    const allVisibleSelected = visible.length > 0 && visible.every((v) => filterDraftSelected.has(v));
+
+    const rows = visible
+        .map((v) => {
+            const checked = filterDraftSelected.has(v) ? "checked" : "";
+            const label = v === "" ? "(Blank)" : v;
+            return `<label class="col-filter__item"><input type="checkbox" data-value="${escapeHTML(
+                v
+            )}" ${checked}> ${escapeHTML(label)}</label>`;
         })
         .join("");
+
+    const focusSearch = document.activeElement && document.activeElement.id === "colFilterSearchInput";
+
+    popover.innerHTML = `
+        <input type="text" class="col-filter__search" id="colFilterSearchInput" placeholder="Search…" value="${escapeHTML(
+            filterDraftSearch
+        )}">
+        <label class="col-filter__item col-filter__selectall"><input type="checkbox" id="colFilterSelectAll" ${
+            allVisibleSelected ? "checked" : ""
+        }> (Select All)</label>
+        <div class="col-filter__list">${rows || '<div class="col-filter__empty">No values</div>'}</div>
+        <div class="col-filter__footer">
+            <button type="button" class="btn btn-ghost" id="colFilterClearBtn">Clear</button>
+            <button type="button" class="btn btn-primary" id="colFilterOkBtn">OK</button>
+        </div>`;
+
+    const searchInput = document.getElementById("colFilterSearchInput");
+    if (focusSearch) {
+        searchInput.focus();
+        const pos = searchInput.value.length;
+        searchInput.setSelectionRange(pos, pos);
+    }
 }
+
+function openColumnFilterPopover(col, btn) {
+    if (openFilterCol === col) {
+        closeColumnFilterPopover();
+        return;
+    }
+    closeColumnFilterPopover();
+
+    openFilterCol = col;
+    filterDraftSearch = "";
+    const options = columnOptions(col);
+    filterDraftSelected = columnFilters[col] ? new Set(columnFilters[col]) : new Set(options);
+
+    const popover = document.createElement("div");
+    popover.id = "colFilterPopover";
+    popover.className = "col-filter-popover";
+    popover.setAttribute("role", "dialog");
+    popover.setAttribute("aria-label", `Filter ${COLUMN_FILTER_LABELS[col] || col}`);
+    document.body.appendChild(popover);
+    renderColumnFilterPopover();
+
+    const rect = btn.getBoundingClientRect();
+    popover.style.top = Math.min(rect.bottom + 6, window.innerHeight - popover.offsetHeight - 8) + "px";
+    popover.style.left = Math.min(rect.left, window.innerWidth - popover.offsetWidth - 8) + "px";
+    btn.setAttribute("aria-expanded", "true");
+}
+
+function applyColumnFilterDraft(col) {
+    const options = columnOptions(col);
+    if (filterDraftSelected.size >= options.length) {
+        delete columnFilters[col];
+    } else {
+        columnFilters[col] = new Set(filterDraftSelected);
+    }
+    closeColumnFilterPopover();
+    updateColumnFilterButtonStates();
+    loadSegments(true);
+}
+
+function clearColumnFilter(col) {
+    delete columnFilters[col];
+    closeColumnFilterPopover();
+    updateColumnFilterButtonStates();
+    loadSegments(true);
+}
+
+document.addEventListener("input", (e) => {
+    if (e.target.id === "colFilterSearchInput") {
+        filterDraftSearch = e.target.value;
+        renderColumnFilterPopover();
+    }
+});
+
+document.addEventListener("change", (e) => {
+    if (!openFilterCol) return;
+    if (e.target.id === "colFilterSelectAll") {
+        const needle = filterDraftSearch.trim().toLowerCase();
+        const options = columnOptions(openFilterCol);
+        const visible = needle
+            ? options.filter((v) => (v === "" ? "(blank)" : v.toLowerCase()).includes(needle))
+            : options;
+        if (e.target.checked) visible.forEach((v) => filterDraftSelected.add(v));
+        else visible.forEach((v) => filterDraftSelected.delete(v));
+        renderColumnFilterPopover();
+    } else if (e.target.matches(".col-filter__list input[type='checkbox']")) {
+        const value = e.target.getAttribute("data-value");
+        if (e.target.checked) filterDraftSelected.add(value);
+        else filterDraftSelected.delete(value);
+        renderColumnFilterPopover();
+    }
+});
+
+document.addEventListener("click", (e) => {
+    if (e.target.id === "colFilterOkBtn") applyColumnFilterDraft(openFilterCol);
+    else if (e.target.id === "colFilterClearBtn") clearColumnFilter(openFilterCol);
+});
 
 // ---- Inline SVG icons (kept in one place) ----------------------------------
 const ICONS = {
@@ -648,6 +530,7 @@ async function loadStats(showSkeleton = false) {
                         <div class="stat-card__site">${ICONS.server}<span>${escapeHTML(
                     stat.site
                 )}</span></div>
+                        <span class="panel__count">${formatSegmentCount(stat.total_segments)}</span>
                     </div>
                     ${renderTypeUsage(stat)}
                 </article>`;
@@ -695,9 +578,14 @@ function emptyState(icon, title, desc) {
         </tr>`;
 }
 
+function formatSegmentCount(n) {
+    n = Number(n) || 0;
+    return n + (n === 1 ? " segment" : " segments");
+}
+
 function updateSegmentCount(n) {
     const el = document.getElementById("segmentCount");
-    if (el) el.textContent = n + (n === 1 ? " segment" : " segments");
+    if (el) el.textContent = formatSegmentCount(n);
 }
 
 // ---- Segment-connectivity request-ids popover ---------------------------------------
@@ -1064,12 +952,16 @@ async function loadSegments(showSkeleton = false) {
         if (needle) {
             segments = segments.filter((s) => quickSearchMatches(s, needle));
         }
-        if (filters.length > 0) {
-            segments = segments.filter((s) => segmentPassesFilters(s));
+
+        lastBaseSegments = segments;
+
+        const hasColumnFilters = Object.keys(columnFilters).length > 0;
+        if (hasColumnFilters) {
+            segments = segments.filter((s) => segmentPassesColumnFilters(s));
         }
         segments = sortSegments(segments);
 
-        const isFiltering = needle.length > 0 || filters.length > 0;
+        const isFiltering = needle.length > 0 || hasColumnFilters;
 
         if (!segments || segments.length === 0) {
             updateSegmentCount(0);
@@ -1151,12 +1043,24 @@ document.addEventListener("DOMContentLoaded", function () {
             updateSortHeaders();
             loadSegments(false);
         };
-        th.addEventListener("click", activateSort);
+        th.addEventListener("click", (e) => {
+            if (e.target.closest(".col-filter-btn")) return;
+            activateSort();
+        });
         th.addEventListener("keydown", (e) => {
+            if (e.target.closest(".col-filter-btn")) return;
             if (e.key === "Enter" || e.key === " ") {
                 e.preventDefault();
                 activateSort();
             }
+        });
+    });
+
+    // Per-column header filters (Excel-style)
+    document.querySelectorAll(".col-filter-btn").forEach((btn) => {
+        btn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            openColumnFilterPopover(btn.getAttribute("data-filter-col"), btn);
         });
     });
 
@@ -1227,41 +1131,19 @@ document.addEventListener("DOMContentLoaded", function () {
     const columnsPopover = document.getElementById("columnsPopover");
     columnsBtn.addEventListener("click", (e) => {
         e.stopPropagation();
-        closeFilterPopover();
+        closeColumnFilterPopover();
         columnsPopover.hidden = !columnsPopover.hidden;
         columnsBtn.setAttribute("aria-expanded", String(!columnsPopover.hidden));
     });
 
-    // Advanced filter builder ("Add filter")
-    const addFilterBtn = document.getElementById("addFilterBtn");
-    const filterPopover = document.getElementById("filterPopover");
-
-    addFilterBtn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        columnsPopover.hidden = true;
-        columnsBtn.setAttribute("aria-expanded", "false");
-        if (filterPopover.hidden) openFilterPopover(null);
-        else closeFilterPopover();
-    });
-
-    document.getElementById("filterCancelBtn").addEventListener("click", closeFilterPopover);
-    document.getElementById("filterSaveBtn").addEventListener("click", saveFilter);
-    document.getElementById("addOrClauseBtn").addEventListener("click", () => {
-        if (draftClauses.length > 0) draftCombinator = "OR";
-        draftClauses.push(newClause("epg_name"));
-        renderFilterRows();
-    });
-    document.getElementById("addAndClauseBtn").addEventListener("click", () => {
-        if (draftClauses.length > 0) draftCombinator = "AND";
-        draftClauses.push(newClause("epg_name"));
-        renderFilterRows();
-    });
-
     // Close popovers on outside click / Escape
     document.addEventListener("click", (e) => {
-        const filterBar = document.getElementById("filterBar");
-        if (!filterPopover.hidden && filterBar && !filterBar.contains(e.target)) {
-            closeFilterPopover();
+        if (
+            openFilterCol &&
+            !e.target.closest(".col-filter-btn") &&
+            !e.target.closest(".col-filter-popover")
+        ) {
+            closeColumnFilterPopover();
         }
         const columnsPicker = document.getElementById("columnsPicker");
         if (!columnsPopover.hidden && columnsPicker && !columnsPicker.contains(e.target)) {
@@ -1291,7 +1173,7 @@ document.addEventListener("DOMContentLoaded", function () {
     });
     document.addEventListener("keydown", (e) => {
         if (e.key === "Escape") {
-            closeFilterPopover();
+            closeColumnFilterPopover();
             closeReqIdsPopover();
             closeConnFailedPopover();
             setPendingPopoverOpen(false);

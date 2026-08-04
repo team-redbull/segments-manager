@@ -12,6 +12,9 @@
 #   - SEGMENTS_MANAGER_URL: URL of the Segments Manager API
 #   - SEGMENTS_MANAGER_TIMEOUT: API timeout in seconds
 #   - SEGMENTS_MANAGER_RETRIES: Number of retry attempts
+#
+# Environment Variables (Optional):
+#   - SEGMENT_TYPE: Segment type to allocate (default: HC)
 #   - CI_PIPELINE_SOURCE: GitLab CI pipeline source
 #   - CI_MERGE_REQUEST_TARGET_BRANCH_NAME: Target branch for MR
 #
@@ -31,6 +34,9 @@ SEGMENTS_MANAGER_TIMEOUT="${SEGMENTS_MANAGER_TIMEOUT}"
 SEGMENTS_MANAGER_RETRIES="${SEGMENTS_MANAGER_RETRIES}"
 # API token for write requests (sent as: Authorization: Bearer <token>)
 SEGMENTS_MANAGER_API_TOKEN="${SEGMENTS_MANAGER_API_TOKEN}"
+# Type of segment to allocate (MCE | INVENTORY | HC | PXE). Required by the
+# API, so default it here rather than making every pipeline set it.
+SEGMENT_TYPE="${SEGMENT_TYPE:-HC}"
 
 # Colors for output
 GREEN='\033[0;32m'
@@ -122,7 +128,7 @@ allocate_vlan() {
   local cluster_name="$1"
   local site="$2"
 
-  echo -e "${BLUE}[INFO]${NC} Allocating VLAN for cluster: ${cluster_name} at site: ${site}"
+  echo -e "${BLUE}[INFO]${NC} Allocating ${SEGMENT_TYPE} VLAN for cluster: ${cluster_name} at site: ${site}"
 
   local response
   local http_code
@@ -135,10 +141,10 @@ allocate_vlan() {
     response=$(curl -s -w "\n%{http_code}" \
       --connect-timeout "${SEGMENTS_MANAGER_TIMEOUT}" \
       --max-time "${SEGMENTS_MANAGER_TIMEOUT}" \
-      -X POST "${SEGMENTS_MANAGER_URL}/api/allocate-segment" \
+      -X POST "${SEGMENTS_MANAGER_URL}/api/segments/allocate" \
       -H "Authorization: Bearer ${SEGMENTS_MANAGER_API_TOKEN}" \
       -H "Content-Type: application/json" \
-      -d "{\"cluster_name\":\"${cluster_name}\",\"site\":\"${site}\"}" \
+      -d "{\"cluster_name\":\"${cluster_name}\",\"site\":\"${site}\",\"type\":\"${SEGMENT_TYPE}\"}" \
       2>/dev/null)
 
     # Extract HTTP code and response body
@@ -234,7 +240,7 @@ if check_segments_manager_health; then
   SEGMENTS_MANAGER_AVAILABLE=true
 else
   echo -e "${YELLOW}[WARNING]${NC} Segments Manager is not available. Clusters will be created without VLAN allocation."
-  echo -e "${YELLOW}[WARNING]${NC} You can manually allocate VLANs later using: POST ${SEGMENTS_MANAGER_URL}/api/allocate-segment"
+  echo -e "${YELLOW}[WARNING]${NC} You can manually allocate VLANs later using: POST ${SEGMENTS_MANAGER_URL}/api/segments/allocate"
   exit 0  # Exit gracefully without failing the pipeline
 fi
 

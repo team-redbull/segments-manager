@@ -16,21 +16,6 @@ from ..services.export_service import ExportService
 
 router = APIRouter()
 
-# Segment Allocation Routes
-@router.post("/allocate-segment", response_model=SegmentAllocationResponse)
-async def allocate_segment(
-    request: SegmentAllocationRequest
-):
-    """Allocate a VLAN segment for a cluster"""
-    return await AllocationService.allocate_segment(request)
-
-@router.post("/release-segment")
-async def release_segment(
-    request: SegmentRelease
-):
-    """Release a VLAN segment allocation"""
-    return await AllocationService.release_segment(request.cluster_name, request.site)
-
 # Segment Management Routes
 @router.get("/segments")
 async def get_segments(
@@ -154,6 +139,40 @@ async def create_segments_bulk(
     
     logger.info(f"Received bulk create request with {len(segments)} segments")
     return await SegmentService.create_segments_bulk(segments)
+
+# Segment Allocation Routes
+#
+# Allocation acts on the segment collection — it picks a member out of the
+# available pool rather than addressing a known CIDR — so both routes hang off
+# /segments like every other sub-route.
+
+@router.post("/segments/allocate", response_model=SegmentAllocationResponse)
+async def allocate_segment(
+    request: SegmentAllocationRequest
+):
+    """Allocate a VLAN segment of a given type for a cluster at a site.
+
+    Idempotent per (cluster_name, site, type): a cluster that already holds a
+    segment of that type at that site gets the same one back.
+    """
+    return await AllocationService.allocate_segment(request)
+
+@router.post("/segments/release")
+async def release_segment(
+    request: SegmentRelease
+):
+    """Release a segment identified by its CIDR value (status Allocated -> Available).
+
+    Keyed by the segment CIDR exactly like /segments/unlock — the CIDR is
+    globally unique, so no site, cluster name or type is needed. Releasing a
+    shared segment frees it from all of its clusters; to drop just one cluster
+    from a shared list, use PUT /segments/clusters.
+
+    Idempotent for an already-"Available" segment (200). Releasing a "Locked"
+    segment is a 409 — nothing was ever allocated, and release is not a path
+    to "Available" (that is /segments/unlock's job).
+    """
+    return await AllocationService.release_segment(request.segment)
 
 # Statistics and Configuration Routes
 @router.get("/sites")

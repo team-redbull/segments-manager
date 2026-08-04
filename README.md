@@ -130,8 +130,8 @@ API_TOKEN=change-me-to-a-long-random-secret   # REQUIRED — the only credential
 | PUT  | `/api/segments/segment-connectivity-requests` | Set the pending connectivity request ids shown in the UI (empty list clears) *(auth)* |
 | DELETE | `/api/segments?segment=` | Delete a segment by CIDR *(auth)* |
 | POST | `/api/segments/bulk` | Bulk create *(auth)* |
-| POST | `/api/allocate-segment` | Allocate a segment for a cluster *(auth)* |
-| POST | `/api/release-segment` | Release a cluster's allocation *(auth)* |
+| POST | `/api/segments/allocate` | Allocate a segment of a given `type` for a cluster at a site *(auth)* |
+| POST | `/api/segments/release` | Release a segment by CIDR (Allocated → Available; 409 if Locked) *(auth)* |
 | GET  | `/api/sites` | Configured sites |
 | GET  | `/api/stats` | Per-site statistics |
 | GET  | `/api/health` | Health check (MongoDB connectivity) |
@@ -148,11 +148,17 @@ curl -X POST http://localhost:8000/api/segments \
   -H "Content-Type: application/json" \
   -d '{"site":"site1","vlan_id":100,"epg_name":"EPG_PROD_01","segment":"192.168.1.0/24","dhcp":true}'
 
-# Allocate for a cluster
-curl -X POST http://localhost:8000/api/allocate-segment \
+# Allocate for a cluster (type is required)
+curl -X POST http://localhost:8000/api/segments/allocate \
   -H "Authorization: Bearer $API_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"cluster_name":"web-cluster","site":"site1"}'
+  -d '{"cluster_name":"web-cluster","site":"site1","type":"HC"}'
+
+# Release it again — keyed by the segment CIDR, exactly like unlock
+curl -X POST http://localhost:8000/api/segments/release \
+  -H "Authorization: Bearer $API_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"segment":"192.168.1.0/24"}'
 ```
 
 ---

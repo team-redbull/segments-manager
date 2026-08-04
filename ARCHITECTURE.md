@@ -118,11 +118,11 @@ POST /api/segments → SegmentService.create_segment()
 
 ### Allocate VLAN (atomic)
 ```
-POST /api/allocate-vlan {cluster_name, site} → AllocationService.allocate_vlan()
-  → find_existing_allocation()  (idempotent short-circuit)
+POST /api/segments/allocate {cluster_name, site, type} → AllocationService.allocate_segment()
+  → find_existing_allocation()  (idempotent short-circuit, scoped by type)
   → find_and_allocate_segment() → allocate_segment():
         find_one_and_update(
-          {site, status: "Available"},
+          {site, type, status: "Available"},
           {$set: {status: "Allocated", cluster_name, allocated_at}},
           sort=[(vlan_id, 1)], return_document=AFTER)
 ```

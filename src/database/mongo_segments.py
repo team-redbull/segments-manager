@@ -157,9 +157,11 @@ async def delete_segment(segment_id: str) -> bool:
 async def allocate_segment(
     site: str,
     cluster_name: str,
+    type: str,
     sort_by_vlan_id: bool = True,
 ) -> Optional[Dict[str, Any]]:
-    """Atomically find an available segment for the given site and mark it allocated.
+    """Atomically find an available segment of the given type for the given site
+    and mark it allocated.
 
     Uses find_one_and_update for true atomicity — unlike the previous two-step
     find-then-update approach, concurrent callers cannot receive the same segment.
@@ -170,6 +172,7 @@ async def allocate_segment(
 
     query = {
         "site": {"$regex": f"^{site}$", "$options": "i"},
+        "type": {"$regex": f"^{type}$", "$options": "i"},
         "status": STATUS_AVAILABLE,
     }
     sort = [("vlan_id", 1)] if sort_by_vlan_id else None

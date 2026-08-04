@@ -33,8 +33,15 @@ class Segment(BaseModel):
 
 
 class SegmentAllocationRequest(BaseModel):
+    """Request for POST /api/segments/allocate.
+
+    `type` is required — an allocator must never have to guess which kind of
+    segment the caller wants. It also scopes the idempotency check, so one
+    cluster can hold e.g. an MCE and an HC segment at the same site.
+    """
     cluster_name: str = Field(..., description="Name of the cluster requesting allocation", examples=["cluster-prod-01"])
     site: str = Field(..., description="Site where the segment should be allocated", examples=["site1"])
+    type: SegmentType = Field(..., description="Type of segment to allocate", examples=["MCE"])
 
     model_config = {
         "extra": "forbid",
@@ -42,7 +49,8 @@ class SegmentAllocationRequest(BaseModel):
             "examples": [
                 {
                     "cluster_name": "cluster-prod-01",
-                    "site": "site1"
+                    "site": "site1",
+                    "type": "MCE"
                 }
             ]
         }
@@ -53,6 +61,7 @@ class SegmentAllocationResponse(BaseModel):
     vlan_id: int = Field(..., description="Allocated VLAN ID", examples=[100])
     cluster_name: str = Field(..., description="Cluster name", examples=["cluster-prod-01"])
     site: str = Field(..., description="Site name", examples=["site1"])
+    type: SegmentType = Field(..., description="Type of the allocated segment", examples=["MCE"])
     segment: str = Field(..., description="Allocated network segment", examples=["192.168.1.0/24"])
     epg_name: str = Field(..., description="Endpoint Group name", examples=["EPG_PROD_01"])
     allocated_at: datetime = Field(..., description="Allocation timestamp")
@@ -64,6 +73,7 @@ class SegmentAllocationResponse(BaseModel):
                     "vlan_id": 100,
                     "cluster_name": "cluster-prod-01",
                     "site": "site1",
+                    "type": "MCE",
                     "segment": "192.168.1.0/24",
                     "epg_name": "EPG_PROD_01",
                     "allocated_at": "2024-01-15T10:30:00Z"
@@ -183,16 +193,21 @@ class SegmentClustersUpdate(BaseModel):
 
 
 class SegmentRelease(BaseModel):
-    cluster_name: str = Field(..., description="Name of the cluster to release", examples=["cluster-prod-01"])
-    site: str = Field(..., description="Site where cluster is allocated", examples=["site1"])
+    """Request for POST /api/segments/release, keyed by the segment CIDR.
+
+    The CIDR is globally unique, so it alone identifies the allocation — no
+    site, cluster_name or type is needed (or accepted). Releasing a shared
+    segment frees it from *all* its clusters; use PUT /api/segments/clusters
+    to drop a single cluster from a shared list.
+    """
+    segment: str = Field(..., description="Network segment in CIDR notation (unique per segment)", examples=["192.168.1.0/24"])
 
     model_config = {
         "extra": "forbid",
         "json_schema_extra": {
             "examples": [
                 {
-                    "cluster_name": "cluster-prod-01",
-                    "site": "site1"
+                    "segment": "192.168.1.0/24"
                 }
             ]
         }
