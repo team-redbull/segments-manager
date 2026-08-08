@@ -1,10 +1,9 @@
 """Allocation utilities for VLAN segment management.
 
 Handles all allocation-related operations including finding allocations,
-atomic allocation, releasing segments, and supporting shared segments.
+atomic allocation, and releasing segments.
 """
 
-import re
 import logging
 import time
 from typing import Optional, Dict, Any
@@ -27,22 +26,14 @@ class AllocationUtils:
     @staticmethod
     async def find_existing_allocation(cluster_name: str, site: str, type: str) -> Optional[Dict[str, Any]]:
         """Find an existing allocation of the given type for a cluster at a site.
-        Supports both single clusters and shared segments (comma-separated).
+
+        `cluster_name` holds exactly one cluster (one segment is never shared by
+        many clusters), so an exact match is the whole search.
         """
-        # Exact match first
         candidates = await get_segments(
             site=site, cluster_name=cluster_name, status=STATUS_ALLOCATED, type=type
         )
-        if candidates:
-            return candidates[0]
-
-        # Shared-segment regex search (cluster may be part of "cluster1,cluster2")
-        all_site_segs = await get_segments(site=site, status=STATUS_ALLOCATED, type=type)
-        pattern = re.compile(rf"(^|,){re.escape(cluster_name)}(,|$)")
-        return next(
-            (s for s in all_site_segs if s.get("cluster_name") and pattern.search(s["cluster_name"])),
-            None
-        )
+        return candidates[0] if candidates else None
 
     @staticmethod
     async def find_and_allocate_segment(site: str, cluster_name: str, type: str) -> Optional[Dict[str, Any]]:
@@ -76,9 +67,7 @@ class AllocationUtils:
         """Release an allocated segment by id (Allocated -> Available).
 
         Callers resolve the segment from its CIDR first, so there is no cluster
-        matching to do here. A shared segment is freed from every cluster at
-        once — to drop a single cluster from a shared list, update the list via
-        SegmentService.update_segment_clusters instead.
+        matching to do here.
         """
         return await _update_segment(segment_id, {
             "status": STATUS_AVAILABLE,

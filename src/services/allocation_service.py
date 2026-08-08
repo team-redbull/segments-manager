@@ -76,8 +76,7 @@ class AllocationService:
         """Release a segment identified by its CIDR (status "Allocated" -> "Available").
 
         Keyed by the CIDR just like unlock — it is globally unique, so it alone
-        identifies the allocation. A shared segment is freed from all of its
-        clusters at once.
+        identifies the allocation.
 
         Status handling:
           "Allocated" -> released (status "Available", cluster_name cleared)

@@ -12,7 +12,7 @@ Segments Manager is **decentralized and per-site**: VLAN IDs and EPG names are u
 
 - **Multi-site VLAN management** — manage segments across sites (site1, site2, …)
 - **Automatic allocation** — atomically find and allocate an available segment for a cluster
-- **Shared segments** — multiple clusters can share one VLAN (comma-separated)
+  (one segment belongs to at most one cluster; one cluster may hold several segments)
 - **Comprehensive validation** — site IP-prefix enforcement, CIDR/subnet rules, overlap detection, per-site VLAN & EPG uniqueness
 - **MongoDB backend** — async (Motor) with atomic allocation and a short in-memory cache
 - **CSV/Excel export** and real-time search

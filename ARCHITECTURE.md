@@ -95,7 +95,7 @@ Collection **`segments`**:
 | `segment` | str | CIDR, e.g. `192.168.1.0/24` |
 | `dhcp` | bool | |
 | `description` | str | |
-| `cluster_name` | str \| None | `None` = available; comma-separated = shared |
+| `cluster_name` | str \| None | `None` = available; one cluster name (never a list) |
 | `allocated_at` | datetime \| None | |
 
 **Indexes** (`init_storage()`):
@@ -131,7 +131,7 @@ POST /api/segments/allocate {cluster_name, site, type} → AllocationService.all
 ### Release VLAN
 ```
 POST /api/release-vlan {cluster_name, site} → AllocationService.release_vlan()
-  → release_segment(): full release, or for shared segments removes just that cluster
+  → release_segment(): clears the segment's cluster and returns it to the pool
 ```
 
 ---

@@ -257,16 +257,23 @@ class TestSegmentCRUD:
         assert r.status_code == 200
 
         u = requests.put(f"{API}/segments/clusters",
-                         json={"segment": seg, "cluster_names": "shared-a,shared-b"},
+                         json={"segment": seg, "cluster_name": "cluster-a"},
                          headers=AUTH_HEADERS, timeout=TIMEOUT)
         assert u.status_code == 200, u.text
         got = requests.get(f"{API}/segments/by-segment", params={"segment": seg},
                            timeout=TIMEOUT).json()
-        assert got["cluster_name"] == "shared-a,shared-b"
+        assert got["cluster_name"] == "cluster-a"
 
-        # empty cluster_names releases the segment (also makes teardown deletable)
+        # a comma-separated list is no longer a valid cluster name — shared
+        # segments were retired, one segment belongs to at most one cluster
+        shared = requests.put(f"{API}/segments/clusters",
+                              json={"segment": seg, "cluster_name": "shared-a,shared-b"},
+                              headers=AUTH_HEADERS, timeout=TIMEOUT)
+        assert shared.status_code == 400, shared.text
+
+        # empty cluster_name releases the segment (also makes teardown deletable)
         rel = requests.put(f"{API}/segments/clusters",
-                           json={"segment": seg, "cluster_names": ""},
+                           json={"segment": seg, "cluster_name": ""},
                            headers=AUTH_HEADERS, timeout=TIMEOUT)
         assert rel.status_code == 200
         got = requests.get(f"{API}/segments/by-segment", params={"segment": seg},
@@ -393,17 +400,17 @@ class TestAllocation:
                            timeout=TIMEOUT).json()
         assert got["status"] == "Locked"
 
-    def test_release_frees_a_shared_segment_entirely(self, segment_factory):
-        # Keyed by CIDR there is no single cluster to remove, so release frees
-        # the segment from all of its clusters at once.
+    def test_release_frees_a_cluster_assigned_segment(self, segment_factory):
+        # A segment assigned through PUT /segments/clusters releases exactly
+        # like one allocated through /segments/allocate.
         v = next_vlan()
         seg = cidr_for("site1", v)
         assert segment_factory(site="site1", vlan_id=v, epg_name=_uid(), segment=seg).status_code == 200
 
-        share = requests.put(f"{API}/segments/clusters",
-                             json={"segment": seg, "cluster_names": "shared-a,shared-b"},
-                             headers=AUTH_HEADERS, timeout=TIMEOUT)
-        assert share.status_code == 200, share.text
+        assign = requests.put(f"{API}/segments/clusters",
+                              json={"segment": seg, "cluster_name": "cluster-a"},
+                              headers=AUTH_HEADERS, timeout=TIMEOUT)
+        assert assign.status_code == 200, assign.text
 
         rel = requests.post(f"{API}/segments/release", json={"segment": seg},
                             headers=AUTH_HEADERS, timeout=TIMEOUT)

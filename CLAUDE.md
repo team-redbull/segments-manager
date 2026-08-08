@@ -181,7 +181,7 @@ Collection: **`segments`**
     "epg_name":     str,
     "segment":      str,             # CIDR, e.g. "192.168.1.0/24" — the natural key (unique + immutable)
     "dhcp":         bool,            # defaults to True on creation; the ONLY mutable field (PATCH /api/segments)
-    "cluster_name": str | None,      # None = available; comma-separated for shared segments
+    "cluster_name": str | None,      # None = available; one cluster name (shared segments were retired)
     "allocated_at": datetime | None, # set on allocation; returned by the allocation API
     "status":       str,             # "Locked" | "Available" | "Allocated" — server-managed lifecycle,
                                      # the SOLE record of allocation state (the legacy `released` /

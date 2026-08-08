@@ -152,25 +152,23 @@ class SegmentService:
     @handle_db_errors
     @retry_on_network_error(max_retries=3)
     @log_operation_timing("update_segment_clusters", threshold_ms=2000)
-    async def update_segment_clusters(segment_value: str, cluster_names: str) -> Dict[str, str]:
-        """Update cluster assignment for a segment (for shared segments)"""
+    async def update_segment_clusters(segment_value: str, cluster_name: Optional[str]) -> Dict[str, str]:
+        """Assign a segment to a single cluster, or release it (empty/omitted).
+
+        One segment belongs to at most one cluster — there is no shared
+        (comma-separated) form.
+        """
         logger.info(f"Updating cluster assignment for segment: {segment_value}")
 
         existing_segment = await SegmentService._get_segment_or_404(segment_value)
         segment_id = str(existing_segment["_id"])
 
-        clean_cluster_names = cluster_names.strip() if cluster_names else None
+        clean_cluster_name = cluster_name.strip() if cluster_name else None
 
-        validated_clusters = []
-        if clean_cluster_names:
-            for cluster in clean_cluster_names.split(","):
-                cluster = cluster.strip()
-                if cluster and cluster.replace("-", "").replace("_", "").isalnum():
-                    validated_clusters.append(cluster)
-
-        if validated_clusters:
+        if clean_cluster_name:
+            Validators.validate_cluster_name(clean_cluster_name)
             update_data = {
-                "cluster_name": ",".join(validated_clusters),
+                "cluster_name": clean_cluster_name,
                 "allocated_at": get_current_utc(),
             }
         else:
@@ -181,7 +179,7 @@ class SegmentService:
         # only the orchestrator's unlock step (POST /api/segments/unlock) may
         # leave that state, and the lifecycle is one-way from there.
         if existing_segment.get("status") != STATUS_LOCKED:
-            update_data["status"] = STATUS_ALLOCATED if validated_clusters else STATUS_AVAILABLE
+            update_data["status"] = STATUS_ALLOCATED if clean_cluster_name else STATUS_AVAILABLE
 
         success = await DatabaseUtils.update_segment_by_id(segment_id, update_data)
 

@@ -67,11 +67,11 @@ async def update_segment_dhcp(
 async def update_segment_clusters(
     request: SegmentClustersUpdate
 ):
-    """Update cluster assignment for a segment (for shared segments).
+    """Assign a segment to a single cluster.
 
-    Empty or omitted cluster_names releases the segment.
+    Empty or omitted cluster_name releases the segment.
     """
-    return await SegmentService.update_segment_clusters(request.segment, request.cluster_names or "")
+    return await SegmentService.update_segment_clusters(request.segment, request.cluster_name)
 
 @router.put("/segments/segment-connectivity-requests")
 async def set_segment_connectivity_requests(
@@ -164,9 +164,7 @@ async def release_segment(
     """Release a segment identified by its CIDR value (status Allocated -> Available).
 
     Keyed by the segment CIDR exactly like /segments/unlock — the CIDR is
-    globally unique, so no site, cluster name or type is needed. Releasing a
-    shared segment frees it from all of its clusters; to drop just one cluster
-    from a shared list, use PUT /segments/clusters.
+    globally unique, so no site, cluster name or type is needed.
 
     Idempotent for an already-"Available" segment (200). Releasing a "Locked"
     segment is a 409 — nothing was ever allocated, and release is not a path

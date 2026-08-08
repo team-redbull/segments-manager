@@ -173,10 +173,10 @@ class SegmentDhcpUpdate(BaseModel):
 
 class SegmentClustersUpdate(BaseModel):
     segment: str = Field(..., description="Network segment in CIDR notation (unique per segment)", examples=["192.168.1.0/24"])
-    cluster_names: Optional[str] = Field(
+    cluster_name: Optional[str] = Field(
         default=None,
-        description="Comma-separated cluster names to assign; empty or omitted releases the segment",
-        examples=["cluster-prod-01,cluster-prod-02"],
+        description="Cluster name to assign (one segment belongs to at most one cluster); empty or omitted releases the segment",
+        examples=["cluster-prod-01"],
     )
 
     model_config = {
@@ -185,7 +185,7 @@ class SegmentClustersUpdate(BaseModel):
             "examples": [
                 {
                     "segment": "192.168.1.0/24",
-                    "cluster_names": "cluster-prod-01,cluster-prod-02"
+                    "cluster_name": "cluster-prod-01"
                 }
             ]
         }
@@ -196,9 +196,7 @@ class SegmentRelease(BaseModel):
     """Request for POST /api/segments/release, keyed by the segment CIDR.
 
     The CIDR is globally unique, so it alone identifies the allocation — no
-    site, cluster_name or type is needed (or accepted). Releasing a shared
-    segment frees it from *all* its clusters; use PUT /api/segments/clusters
-    to drop a single cluster from a shared list.
+    site, cluster_name or type is needed (or accepted).
     """
     segment: str = Field(..., description="Network segment in CIDR notation (unique per segment)", examples=["192.168.1.0/24"])
 

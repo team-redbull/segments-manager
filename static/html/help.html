@@ -41,7 +41,6 @@
                 <li><a href="#overview">Overview</a></li>
                 <li><a href="#core-concepts">Core concepts</a></li>
                 <li><a href="#ui-guide">Interface guide</a></li>
-                <li><a href="#shared-segments">Shared segments</a></li>
                 <li><a href="#api-reference">API reference</a></li>
                 <li><a href="#examples">Examples</a></li>
                 <li><a href="#troubleshooting">Troubleshooting</a></li>
@@ -53,7 +52,7 @@
                 <svg viewBox="0 0 24 24" class="icon"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
                 Overview
             </h2>
-            <p>Segments Manager is a tool for managing network VLAN segments across multiple sites. It supports automatic allocation via the API, a read-only dashboard for visibility, and shared segments where multiple clusters can use the same VLAN.</p>
+            <p>Segments Manager is a tool for managing network VLAN segments across multiple sites. It supports automatic allocation via the API and a read-only dashboard for visibility. Each segment belongs to at most one cluster; a cluster may hold several segments (one per type per site).</p>
 
             <h3>Key features</h3>
             <ul>
@@ -62,7 +61,6 @@
                 <li><strong>MongoDB backend</strong> — segments stored in MongoDB with atomic allocation.</li>
                 <li><strong>Flexible subnets</strong> — support for a range of subnet sizes.</li>
                 <li><strong>Automatic allocation</strong> — find and allocate available segments programmatically.</li>
-                <li><strong>Shared segments</strong> — multiple clusters can share the same VLAN segment.</li>
                 <li><strong>Read-only dashboard</strong> — the web UI is a live view; creation, allocation, and edits happen via the API.</li>
                 <li><strong>Export</strong> — download data as CSV or Excel.</li>
                 <li><strong>Real-time search</strong> — search by cluster, EPG, VLAN, or segment.</li>
@@ -97,8 +95,7 @@
             <h3>Allocation logic</h3>
             <p>When allocating a segment for a cluster:</p>
             <ol>
-                <li>Check if the cluster already has a segment at the site.</li>
-                <li>Check if the cluster is part of a shared segment.</li>
+                <li>Check if the cluster already has a segment of that type at the site — if so, return it.</li>
                 <li>If not found, atomically allocate the first segment with status <strong>Available</strong>.</li>
                 <li>If no <code>Available</code> segments exist at the site, return an error.</li>
             </ol>
@@ -121,43 +118,6 @@
 
             <h3>Creating, allocating, editing, or deleting segments</h3>
             <p>These operations aren't available from the UI. Use the REST API directly — see the <a href="#api-reference">API reference</a> and <a href="#examples">examples</a> below.</p>
-        </section>
-
-        <section class="doc-section" id="shared-segments">
-            <h2>
-                <svg viewBox="0 0 24 24" class="icon"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
-                Shared segments
-            </h2>
-            <p>Shared segments allow multiple clusters to use the same VLAN, which is useful for clusters that need to communicate on the same network segment.</p>
-
-            <h3>Creating shared segments</h3>
-            <p>Use the API to set multiple cluster names on a segment:</p>
-            <ol>
-                <li>Call <code>PUT /api/segments/clusters</code></li>
-                <li>Set <code>segment</code> to the segment's CIDR and <code>cluster_names</code> to a comma-separated list, e.g. <code>cluster1,cluster2,cluster3</code></li>
-            </ol>
-
-            <h3>Managing shared segments</h3>
-            <ul>
-                <li><strong>Add clusters</strong> — call the endpoint again with more cluster names.</li>
-                <li><strong>Remove clusters</strong> — call the endpoint again with specific cluster names removed.</li>
-                <li><strong>Release segment</strong> — send an empty <code>cluster_names</code> value to release all allocations.</li>
-            </ul>
-
-            <div class="example">
-                <h4>Example scenarios</h4>
-                <ul>
-                    <li><strong>Single to shared:</strong> <code>cluster1</code> → <code>cluster1,cluster2</code></li>
-                    <li><strong>Add to shared:</strong> <code>cluster1,cluster2</code> → <code>cluster1,cluster2,cluster3</code></li>
-                    <li><strong>Remove from shared:</strong> <code>cluster1,cluster2,cluster3</code> → <code>cluster1,cluster2</code></li>
-                    <li><strong>Release all:</strong> <code>cluster1,cluster2</code> → <em>(empty)</em></li>
-                </ul>
-            </div>
-
-            <div class="callout">
-                <svg viewBox="0 0 24 24" class="icon icon-sm"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-                <span><strong>Note:</strong> When using the API to release a single cluster from a shared segment, only that specific cluster is removed. Other clusters continue to use the segment.</span>
-            </div>
         </section>
 
         <section class="doc-section" id="api-reference">
@@ -246,11 +206,11 @@
             <div class="endpoint">
                 <span class="method put">PUT</span>
                 <span class="endpoint__path">/api/segments/clusters</span>
-                <span class="endpoint__desc">— Update cluster assignment (empty releases the segment)</span>
+                <span class="endpoint__desc">— Assign the segment to a single cluster (empty releases the segment)</span>
             </div>
             <div class="code-block">{
   "segment": "192.168.1.0/24",
-  "cluster_names": "cluster1,cluster2,cluster3"
+  "cluster_name": "cluster1"
 }</div>
 
             <div class="endpoint">
@@ -276,7 +236,7 @@
             <div class="endpoint">
                 <span class="method post">POST</span>
                 <span class="endpoint__path">/api/segments/release</span>
-                <span class="endpoint__desc">— Release a segment by CIDR (Allocated → Available); frees a shared segment from all its clusters. 409 if the segment is still Locked</span>
+                <span class="endpoint__desc">— Release a segment by CIDR (Allocated → Available). 409 if the segment is still Locked</span>
             </div>
             <div class="code-block">{
   "segment": "192.168.1.0/24"
@@ -356,24 +316,14 @@ curl -H "Authorization: Bearer $API_TOKEN" -X POST "http://localhost:8000/api/se
     "type": "HC"
   }'</div>
 
-            <h3>Create a shared segment</h3>
-            <div class="code-block"># 1. First allocate to one cluster
-curl -X POST "http://localhost:8000/api/segments/allocate" \
-  -H "Authorization: Bearer $API_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "cluster_name": "frontend",
-    "site": "site1",
-    "type": "HC"
-  }'
-
-# 2. Update to share with multiple clusters (keyed by the segment CIDR)
+            <h3>Reassign a segment to another cluster</h3>
+            <div class="code-block"># Keyed by the segment CIDR; one cluster name only
 curl -X PUT "http://localhost:8000/api/segments/clusters" \
   -H "Authorization: Bearer $API_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
     "segment": "192.168.15.0/24",
-    "cluster_names": "frontend,backend,database"
+    "cluster_name": "backend"
   }'</div>
 
             <h3>Search segments</h3>
@@ -410,7 +360,6 @@ curl "http://localhost:8000/api/segments/search?q=cluster&site=site1&allocated=t
             <ul>
                 <li>Use descriptive EPG names.</li>
                 <li>Plan your VLAN ID ranges per site to avoid conflicts.</li>
-                <li>Use shared segments sparingly and document which clusters share them.</li>
                 <li>Regularly export data for backup purposes.</li>
                 <li>Monitor the statistics to track utilization.</li>
             </ul>
