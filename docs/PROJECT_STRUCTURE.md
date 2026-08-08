@@ -51,8 +51,9 @@ segments_2/
 │   └── bulk_segments_selected.csv
 │
 ├── scripts/                   # Utility scripts
-│   ├── create_netbox_resources.py
-│   └── allocate-vlan-ci.sh
+│   ├── audit_site_pools.py
+│   ├── migrate_drop_shared_clusters.py
+│   └── migrate_segment_connectivity_fields.py
 │
 ├── deploy/                    # Deployment configurations
 │   ├── helm/                 # Kubernetes Helm chart
