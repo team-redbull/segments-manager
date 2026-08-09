@@ -172,22 +172,15 @@ class SegmentService:
         Idempotent: repeating a completed conversion converges to the same
         state (and never re-locks a segment whose lifecycle has moved on to
         "Allocated").
+
+        Both guards are applied ATOMICALLY, in the update's own filter. They
+        used to be a read, a check and then a write, which is not a
+        compare-and-set: two conversions racing for one segment both read the
+        old type, both passed the check and both wrote, so both callers were
+        answered "updated" while only the last write survived. Whatever the
+        filter does not match is diagnosed afterwards, from a fresh read, to
+        pick the right status code.
         """
-        existing_segment = await SegmentService._get_segment_or_404(segment_value)
-        current_type = existing_segment.get("type")
-
-        if current_type == new_type:
-            if existing_segment.get("status") == STATUS_ALLOCATED:
-                return {"message": "Segment already up to date"}
-        else:
-            if expected_type is not None and current_type != expected_type:
-                raise HTTPException(
-                    status_code=409,
-                    detail=f"Segment type is '{current_type}', expected '{expected_type}'"
-                )
-            if existing_segment.get("status") == STATUS_ALLOCATED:
-                raise HTTPException(status_code=409, detail="Cannot convert allocated segment")
-
         converted_state: Dict[str, Any] = {
             "type": new_type,
             "status": STATUS_LOCKED,
@@ -196,19 +189,48 @@ class SegmentService:
             "segment_connectivity_failure": None,
             "segment_connectivity_failure_at": None,
         }
-        if all(existing_segment.get(key) == value for key, value in converted_state.items()):
+        # Which stored types may be converted FROM. `new_type` is always
+        # allowed so a repeated call converges instead of conflicting; without
+        # expected_type there is no compare-and-set and any type converts.
+        allowed_from_types = (
+            [expected_type, new_type] if expected_type is not None else None
+        )
+
+        previous_segment = await DatabaseUtils.convert_segment_type(
+            segment_value, converted_state, allowed_from_types
+        )
+        if previous_segment is not None:
+            if all(
+                previous_segment.get(key) == value
+                for key, value in converted_state.items()
+            ):
+                return {"message": "Segment already up to date"}
+            logger.info(
+                f"Converted segment {segment_value}: type "
+                f"{previous_segment.get('type')} -> {new_type} (status: {STATUS_LOCKED})"
+            )
+            return {"message": "Segment type updated"}
+
+        # Nothing matched — read back to say why (404 / allocated / lost race).
+        existing_segment = await SegmentService._get_segment_or_404(segment_value)
+        current_type = existing_segment.get("type")
+        if current_type == new_type and existing_segment.get("status") == STATUS_ALLOCATED:
+            # The conversion is already done and the segment has moved on to
+            # "Allocated" — converged, and deliberately never re-locked.
             return {"message": "Segment already up to date"}
-
-        success = await DatabaseUtils.update_segment_by_id(
-            str(existing_segment["_id"]), converted_state
+        if expected_type is not None and current_type not in (expected_type, new_type):
+            raise HTTPException(
+                status_code=409,
+                detail=f"Segment type is '{current_type}', expected '{expected_type}'"
+            )
+        if existing_segment.get("status") == STATUS_ALLOCATED:
+            raise HTTPException(status_code=409, detail="Cannot convert allocated segment")
+        # The segment satisfies the guard now but did not when the atomic
+        # update ran: it changed underneath us, which is the race itself.
+        raise HTTPException(
+            status_code=409,
+            detail=f"Segment {segment_value} changed during conversion — retry"
         )
-        if not success:
-            raise HTTPException(status_code=500, detail="Failed to update segment")
-
-        logger.info(
-            f"Converted segment {segment_value}: type {current_type} -> {new_type} (status: {STATUS_LOCKED})"
-        )
-        return {"message": "Segment type updated"}
 
     @staticmethod
     @handle_db_errors

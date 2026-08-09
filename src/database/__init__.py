@@ -11,6 +11,7 @@ from .mongo_segments import (
     get_segment_by_segment,
     create_segment,
     update_segment,
+    convert_segment_type,
     delete_segment,
     allocate_segment,
 )
@@ -25,6 +26,7 @@ __all__ = [
     "get_segment_by_segment",
     "create_segment",
     "update_segment",
+    "convert_segment_type",
     "delete_segment",
     "allocate_segment",
 ]

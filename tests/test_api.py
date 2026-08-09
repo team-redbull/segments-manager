@@ -13,6 +13,7 @@ Covers the decentralized, per-site MongoDB model:
 """
 
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 
 import requests
 
@@ -798,6 +799,31 @@ class TestSegmentTypeConversion:
         assert r.status_code == 200, r.text
         assert "up to date" in r.json()["message"].lower()
         assert self._get(cidr).json()["status"] == "Allocated"
+
+    def test_concurrent_conversions_only_one_wins(self, segment_factory):
+        # expected_type is a compare-and-set, so racing conversions of ONE
+        # segment to DIFFERENT types must produce exactly one winner. This
+        # used to be a read, a check and then a write: both callers read the
+        # old type, both passed the check and both wrote, so both were told
+        # "updated" while only the last write survived.
+        v = next_vlan()
+        cidr = cidr_for("site1", v)
+        segment_factory(site="site1", vlan_id=v, epg_name=_uid(), segment=cidr,
+                        type="HC", keep_locked=True)
+
+        targets = ["MCE", "PXE", "INVENTORY"]
+        with ThreadPoolExecutor(max_workers=len(targets)) as pool:
+            responses = list(pool.map(
+                lambda t: self._convert(cidr, t, expected_type="HC"), targets
+            ))
+
+        winners = [t for t, r in zip(targets, responses) if r.status_code == 200]
+        assert len(winners) == 1, (
+            "exactly one conversion may win, got "
+            f"{[(t, r.status_code, r.text) for t, r in zip(targets, responses)]}"
+        )
+        assert all(r.status_code == 409 for r in responses if r.status_code != 200)
+        assert self._get(cidr).json()["type"] == winners[0]
 
     def test_convert_unknown_segment_404(self):
         assert self._convert("10.99.99.0/24", "MCE").status_code == 404
