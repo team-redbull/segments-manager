@@ -180,7 +180,7 @@ Collection: **`segments`**
     "vlan_id":      int,             # 1–4094
     "epg_name":     str,
     "segment":      str,             # CIDR, e.g. "192.168.1.0/24" — the natural key (unique + immutable)
-    "dhcp":         bool,            # defaults to True on creation; the ONLY mutable field (PATCH /api/segments)
+    "dhcp":         bool,            # defaults to True on creation; the only in-place-editable field (PATCH /api/segments)
     "cluster_name": str | None,      # None = available; one cluster name (shared segments were retired)
     "allocated_at": datetime | None, # set on allocation; returned by the allocation API
     "status":       str,             # "Locked" | "Available" | "Allocated" — server-managed lifecycle,
@@ -196,9 +196,9 @@ Collection: **`segments`**
 }
 ```
 
-> **`type` is one of `MCE`, `INVENTORY`, `HC`, `PXE`**, enforced by a Pydantic `Literal` (422 on any other value). Optional on create — defaults to `"HC"` if omitted. **Required** on `POST /api/segments/allocate`: the allocator must never guess which kind of segment a caller wants. (Release does *not* take it — the CIDR already determines the type.) It's a plain classifier with no lifecycle logic attached, unlike `status`.
+> **`type` is one of `MCE`, `INVENTORY`, `HC`, `PXE`**, enforced by a Pydantic `Literal` (422 on any other value). Optional on create — defaults to `"HC"` if omitted. **Required** on `POST /api/segments/allocate`: the allocator must never guess which kind of segment a caller wants. (Release does *not* take it — the CIDR already determines the type.) Changing it is a CONVERSION, not an edit: `PUT /api/segments/type` `{segment, type, expected_type?}` re-types a non-Allocated segment and resets it to born-Locked with every `segment_connectivity_*` field cleared — the old type's firewall rules don't cover the new type, so the segment must go back through the connectivity flow before it may be allocated. Idempotent (repeat converges; a same-type repeat never re-locks a segment whose lifecycle moved on to Allocated); an Allocated segment answers 409; `expected_type` is an optional compare-and-set (409 if the stored type matches neither it nor the new type) so two concurrent conversions can't silently hijack one segment. Called by the orchestrator's convert-segment workflow.
 
-> **Locked is the default status for new segments.** Lifecycle is one-way: `Locked → Available → Allocated → Available` — a segment can never become locked again via the API (no re-lock endpoint exists). It signals that firewall rules haven't been opened yet. `allocate_segment()` only considers segments with `status: "Available"`. An external service unlocks a segment via `POST /api/segments/unlock` with body `{"segment": "<cidr>"}` once provisioning is done.
+> **Locked is the default status for new segments.** Lifecycle is one-way: `Locked → Available → Allocated → Available` — no re-lock endpoint exists, and the SOLE deliberate exception is type conversion (`PUT /api/segments/type`, above), which re-locks precisely because the new type's firewall rules aren't open yet. It signals that firewall rules haven't been opened yet. `allocate_segment()` only considers segments with `status: "Available"`. An external service unlocks a segment via `POST /api/segments/unlock` with body `{"segment": "<cidr>"}` once provisioning is done.
 
 > **Pending segment-connectivity request ids.** While waiting for firewall approval, the segment-connectivity orchestrator mirrors its still-pending request ids onto the segment via `PUT /api/segments/segment-connectivity-requests` (body `{"segment", "request_ids", "submitted_at"}`; `submitted_at` is optional, replace semantics, idempotent, empty list clears both fields — stored as `None`). The UI renders a **Requests ID** button beside the status badge whenever the list is non-empty; clicking it opens a popover anchored to the button. The popover header shows elapsed time since `submitted_at` ("Submitted N minutes ago", escalating to hours then days), followed by the pending ids. The display disappears automatically once the orchestrator sends the final empty update (all requests complete).
 

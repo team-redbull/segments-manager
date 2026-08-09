@@ -5,7 +5,7 @@ from fastapi import APIRouter, HTTPException
 from ..models.schemas import (
     SegmentAllocationRequest, SegmentAllocationResponse,
     SegmentRelease, SegmentUnlock, Segment,
-    SegmentDhcpUpdate, SegmentClustersUpdate,
+    SegmentDhcpUpdate, SegmentTypeUpdate, SegmentClustersUpdate,
     SegmentConnectivityRequestsUpdate, SegmentConnectivityFailure
 )
 from ..services.allocation_service import AllocationService
@@ -56,12 +56,33 @@ async def get_segment(segment: str):
 async def update_segment_dhcp(
     request: SegmentDhcpUpdate
 ):
-    """Update a segment's DHCP flag — the only mutable segment field.
+    """Update a segment's DHCP flag — the only in-place-editable segment field.
 
-    All other fields (site, vlan_id, epg_name, segment) are immutable after
-    creation; lifecycle fields are managed by their own endpoints.
+    Identity fields (site, vlan_id, epg_name, segment) are immutable after
+    creation; `type` changes only through the conversion endpoint
+    (PUT /segments/type); lifecycle fields are managed by their own endpoints.
     """
     return await SegmentService.update_segment_dhcp(request.segment, request.dhcp)
+
+@router.put("/segments/type")
+async def update_segment_type(
+    request: SegmentTypeUpdate
+):
+    """Convert a segment to another type (status returns to "Locked").
+
+    Called by the segment-lifecycle orchestrator's convert-segment workflow.
+    Conversion resets the segment to the state a freshly created one starts
+    in: status "Locked" (its firewall rules must be re-opened for the new
+    type before it may be allocated) with all segment-connectivity fields —
+    the old type's pending request ids and any stale failure note — cleared.
+
+    An "Allocated" segment is never converted (409). `expected_type`, when
+    given, is a compare-and-set guard against concurrent conversions: 409 if
+    the stored type matches neither it nor the new type. Idempotent.
+    """
+    return await SegmentService.update_segment_type(
+        request.segment, request.type, request.expected_type
+    )
 
 @router.put("/segments/clusters")
 async def update_segment_clusters(

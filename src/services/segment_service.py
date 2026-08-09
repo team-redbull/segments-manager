@@ -130,11 +130,12 @@ class SegmentService:
     @retry_on_network_error(max_retries=3)
     @log_operation_timing("update_segment_dhcp", threshold_ms=2000)
     async def update_segment_dhcp(segment_value: str, dhcp: bool) -> Dict[str, str]:
-        """Update a segment's DHCP flag — the only mutable segment field.
+        """Update a segment's DHCP flag — the only in-place-editable segment field.
 
-        Everything else (site, vlan_id, epg_name, segment) is immutable after
-        creation; lifecycle fields (status, cluster_name, ...) are managed by
-        their own endpoints. Idempotent: setting the current value is a no-op.
+        Identity fields (site, vlan_id, epg_name, segment) are immutable after
+        creation; `type` changes only through conversion (update_segment_type);
+        lifecycle fields (status, cluster_name, ...) are managed by their own
+        endpoints. Idempotent: setting the current value is a no-op.
         """
         existing_segment = await SegmentService._get_segment_or_404(segment_value)
 
@@ -147,6 +148,67 @@ class SegmentService:
 
         logger.info(f"Updated segment {segment_value}: dhcp={dhcp}")
         return {"message": "Segment updated successfully"}
+
+    @staticmethod
+    @handle_db_errors
+    @retry_on_network_error(max_retries=3)
+    @log_operation_timing("update_segment_type", threshold_ms=2000)
+    async def update_segment_type(
+        segment_value: str, new_type: str, expected_type: Optional[str] = None
+    ) -> Dict[str, str]:
+        """Convert a segment to another type (status returns to "Locked").
+
+        A converted segment needs its firewall rules re-opened for the new
+        type, so conversion resets the segment to the same state a freshly
+        created one starts in: status "Locked" (excluded from allocation until
+        the segment-connectivity orchestrator unlocks it) with every
+        segment_connectivity_* field cleared — the pending request ids belong
+        to the OLD type's firewall requests and would otherwise linger in the
+        UI, and a stale "Workflow failed" note has no other clearing path.
+
+        Guards: an "Allocated" segment is in use and is never converted (409).
+        With `expected_type` set, a stored type that matches neither the new
+        type nor `expected_type` is a conversion race — refused (409).
+        Idempotent: repeating a completed conversion converges to the same
+        state (and never re-locks a segment whose lifecycle has moved on to
+        "Allocated").
+        """
+        existing_segment = await SegmentService._get_segment_or_404(segment_value)
+        current_type = existing_segment.get("type")
+
+        if current_type == new_type:
+            if existing_segment.get("status") == STATUS_ALLOCATED:
+                return {"message": "Segment already up to date"}
+        else:
+            if expected_type is not None and current_type != expected_type:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Segment type is '{current_type}', expected '{expected_type}'"
+                )
+            if existing_segment.get("status") == STATUS_ALLOCATED:
+                raise HTTPException(status_code=409, detail="Cannot convert allocated segment")
+
+        converted_state: Dict[str, Any] = {
+            "type": new_type,
+            "status": STATUS_LOCKED,
+            "segment_connectivity_requests": None,
+            "segment_connectivity_requests_submitted_at": None,
+            "segment_connectivity_failure": None,
+            "segment_connectivity_failure_at": None,
+        }
+        if all(existing_segment.get(key) == value for key, value in converted_state.items()):
+            return {"message": "Segment already up to date"}
+
+        success = await DatabaseUtils.update_segment_by_id(
+            str(existing_segment["_id"]), converted_state
+        )
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to update segment")
+
+        logger.info(
+            f"Converted segment {segment_value}: type {current_type} -> {new_type} (status: {STATUS_LOCKED})"
+        )
+        return {"message": "Segment type updated"}
 
     @staticmethod
     @handle_db_errors

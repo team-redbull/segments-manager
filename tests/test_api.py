@@ -682,6 +682,143 @@ class TestSegmentConnectivityFailure:
 
 
 # ---------------------------------------------------------------------------
+# Type conversion (PUT /segments/type — convert-segment orchestrator workflow;
+# resets the segment to born-Locked with all connectivity state cleared)
+# ---------------------------------------------------------------------------
+class TestSegmentTypeConversion:
+    def _get(self, cidr):
+        return requests.get(f"{API}/segments/by-segment", params={"segment": cidr}, timeout=TIMEOUT)
+
+    def _convert(self, cidr, new_type, expected_type=None, headers=AUTH_HEADERS):
+        body = {"segment": cidr, "type": new_type}
+        if expected_type is not None:
+            body["expected_type"] = expected_type
+        return requests.put(f"{API}/segments/type", json=body, headers=headers, timeout=TIMEOUT)
+
+    def test_convert_available_segment_relocks(self, segment_factory):
+        v = next_vlan()
+        cidr = cidr_for("site1", v)
+        r = segment_factory(site="site1", vlan_id=v, epg_name=_uid(), segment=cidr, type="HC")
+        assert r.status_code == 200, r.text
+        assert self._get(cidr).json()["status"] == "Available"
+
+        conv = self._convert(cidr, "MCE", expected_type="HC")
+        assert conv.status_code == 200, conv.text
+
+        seg = self._get(cidr).json()
+        assert seg["type"] == "MCE"
+        assert seg["status"] == "Locked"  # rules must be re-opened for the new type
+
+    def test_convert_locked_segment_clears_request_ids(self, segment_factory):
+        v = next_vlan()
+        cidr = cidr_for("site1", v)
+        segment_factory(site="site1", vlan_id=v, epg_name=_uid(), segment=cidr,
+                        type="HC", keep_locked=True)
+        requests.put(f"{API}/segments/segment-connectivity-requests",
+                     json={"segment": cidr, "request_ids": [496252, 825197],
+                           "submitted_at": "2026-01-01T00:00:00Z"},
+                     headers=AUTH_HEADERS, timeout=TIMEOUT)
+
+        conv = self._convert(cidr, "PXE", expected_type="HC")
+        assert conv.status_code == 200, conv.text
+
+        seg = self._get(cidr).json()
+        assert seg["type"] == "PXE"
+        assert seg["status"] == "Locked"
+        # The old type's pending firewall request ids are gone from the display
+        assert seg.get("segment_connectivity_requests") in (None, [])
+        assert seg.get("segment_connectivity_requests_submitted_at") in (None, "")
+
+    def test_convert_clears_failure_note(self, segment_factory):
+        v = next_vlan()
+        cidr = cidr_for("site1", v)
+        segment_factory(site="site1", vlan_id=v, epg_name=_uid(), segment=cidr,
+                        type="HC", keep_locked=True)
+        requests.put(f"{API}/segments/segment-connectivity-failure",
+                     json={"segment": cidr, "message": "old-type workflow failed"},
+                     headers=AUTH_HEADERS, timeout=TIMEOUT)
+
+        conv = self._convert(cidr, "MCE", expected_type="HC")
+        assert conv.status_code == 200, conv.text
+
+        seg = self._get(cidr).json()
+        assert seg.get("segment_connectivity_failure") in (None, "")
+        assert seg.get("segment_connectivity_failure_at") in (None, "")
+
+    def test_convert_idempotent_repeat(self, segment_factory):
+        v = next_vlan()
+        cidr = cidr_for("site1", v)
+        segment_factory(site="site1", vlan_id=v, epg_name=_uid(), segment=cidr,
+                        type="HC", keep_locked=True)
+
+        first = self._convert(cidr, "MCE", expected_type="HC")
+        # A retry after a lost response repeats the SAME call — expected_type
+        # no longer matches the stored type, but the new type does: accepted.
+        second = self._convert(cidr, "MCE", expected_type="HC")
+        assert first.status_code == 200 and second.status_code == 200
+        assert "up to date" in second.json()["message"].lower()
+        assert self._get(cidr).json()["type"] == "MCE"
+
+    def test_convert_expected_type_mismatch_409(self, segment_factory):
+        v = next_vlan()
+        cidr = cidr_for("site1", v)
+        segment_factory(site="site1", vlan_id=v, epg_name=_uid(), segment=cidr,
+                        type="HC", keep_locked=True)
+
+        r = self._convert(cidr, "PXE", expected_type="MCE")
+        assert r.status_code == 409, r.text
+        assert self._get(cidr).json()["type"] == "HC"  # untouched
+
+    def test_convert_allocated_409(self, segment_factory, release_allocated):
+        v = next_vlan()
+        cidr = cidr_for("site1", v)
+        segment_factory(site="site1", vlan_id=v, epg_name=_uid(), segment=cidr, type="HC")
+        requests.put(f"{API}/segments/clusters",
+                     json={"segment": cidr, "cluster_name": "conv-cluster"},
+                     headers=AUTH_HEADERS, timeout=TIMEOUT)
+        release_allocated(cidr)
+        assert self._get(cidr).json()["status"] == "Allocated"
+
+        r = self._convert(cidr, "MCE", expected_type="HC")
+        assert r.status_code == 409, r.text
+        assert self._get(cidr).json()["type"] == "HC"
+
+    def test_convert_same_type_on_allocated_is_noop(self, segment_factory, release_allocated):
+        # Conversion already happened and the lifecycle moved on — a stale
+        # repeat must never re-lock an in-use segment.
+        v = next_vlan()
+        cidr = cidr_for("site1", v)
+        segment_factory(site="site1", vlan_id=v, epg_name=_uid(), segment=cidr, type="MCE")
+        requests.put(f"{API}/segments/clusters",
+                     json={"segment": cidr, "cluster_name": "conv-cluster"},
+                     headers=AUTH_HEADERS, timeout=TIMEOUT)
+        release_allocated(cidr)
+
+        r = self._convert(cidr, "MCE", expected_type="HC")
+        assert r.status_code == 200, r.text
+        assert "up to date" in r.json()["message"].lower()
+        assert self._get(cidr).json()["status"] == "Allocated"
+
+    def test_convert_unknown_segment_404(self):
+        assert self._convert("10.99.99.0/24", "MCE").status_code == 404
+
+    def test_convert_bad_type_422(self, segment_factory):
+        v = next_vlan()
+        cidr = cidr_for("site1", v)
+        segment_factory(site="site1", vlan_id=v, epg_name=_uid(), segment=cidr, keep_locked=True)
+        r = requests.put(f"{API}/segments/type",
+                         json={"segment": cidr, "type": "BOGUS"},
+                         headers=AUTH_HEADERS, timeout=TIMEOUT)
+        assert r.status_code == 422
+
+    def test_convert_requires_auth(self, segment_factory):
+        v = next_vlan()
+        cidr = cidr_for("site1", v)
+        segment_factory(site="site1", vlan_id=v, epg_name=_uid(), segment=cidr, keep_locked=True)
+        assert self._convert(cidr, "MCE", headers=None).status_code == 401
+
+
+# ---------------------------------------------------------------------------
 # Stats
 # ---------------------------------------------------------------------------
 class TestStats:

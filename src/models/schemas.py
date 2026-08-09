@@ -151,9 +151,10 @@ class SegmentConnectivityFailure(BaseModel):
 class SegmentDhcpUpdate(BaseModel):
     """Update request keyed by the segment's natural key (its CIDR).
 
-    `dhcp` is the only mutable segment field — everything else (site, vlan_id,
-    epg_name, segment) is immutable after creation, and lifecycle fields are
-    server-managed.
+    `dhcp` is the only in-place-editable segment field — identity fields
+    (site, vlan_id, epg_name, segment) are immutable after creation, `type`
+    changes only through the conversion endpoint (PUT /segments/type), and
+    lifecycle fields are server-managed.
     """
     segment: str = Field(..., description="Network segment in CIDR notation (unique per segment)", examples=["192.168.1.0/24"])
     dhcp: bool = Field(..., description="New DHCP setting for this segment")
@@ -165,6 +166,37 @@ class SegmentDhcpUpdate(BaseModel):
                 {
                     "segment": "192.168.1.0/24",
                     "dhcp": True
+                }
+            ]
+        }
+    }
+
+
+class SegmentTypeUpdate(BaseModel):
+    """Request for PUT /api/segments/type — convert a segment to another type.
+
+    `type` is the NEW type to set. `expected_type` is an optional
+    compare-and-set guard: the current type the caller believes it is
+    converting FROM. If the stored type matches neither `type` (already
+    converted) nor `expected_type`, the conversion is refused (409) — another
+    caller re-typed the segment first.
+    """
+    segment: str = Field(..., description="Network segment in CIDR notation (unique per segment)", examples=["192.168.1.0/24"])
+    type: SegmentType = Field(..., description="New segment type to set", examples=["MCE"])
+    expected_type: Optional[SegmentType] = Field(
+        default=None,
+        description="Compare-and-set guard: the current type being converted from; 409 if the stored type differs (unless it already equals the new type)",
+        examples=["HC"],
+    )
+
+    model_config = {
+        "extra": "forbid",
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "segment": "192.168.1.0/24",
+                    "type": "MCE",
+                    "expected_type": "HC"
                 }
             ]
         }
