@@ -143,6 +143,44 @@ async def update_segment(segment_id: str, updates: Dict[str, Any]) -> bool:
     return False
 
 
+async def convert_segment_type(
+    segment_value: str,
+    converted_state: Dict[str, Any],
+    allowed_from_types: Optional[List[str]] = None,
+) -> Optional[Dict[str, Any]]:
+    """Atomically convert a segment's type, returning the PRE-update document.
+
+    The whole guard lives in the filter, exactly like allocate_segment above:
+    the segment must not be "Allocated", and — when allowed_from_types is given
+    — must still carry one of the types the caller is allowed to convert FROM.
+    A read-then-write cannot express this. Two conversions racing for one
+    segment both read the old type, both pass the check and both write, so both
+    callers are told they won while only the last write survives.
+
+    Returns None when nothing matched; the caller reads the segment back to
+    tell 404 / allocated / lost-the-race apart.
+    """
+    from pymongo import ReturnDocument
+
+    col = get_segments_collection()
+    query: Dict[str, Any] = {
+        "segment": segment_value,
+        "status": {"$ne": STATUS_ALLOCATED},
+    }
+    if allowed_from_types is not None:
+        query["type"] = {"$in": allowed_from_types}
+
+    doc = await col.find_one_and_update(
+        query,
+        {"$set": {k: v for k, v in converted_state.items() if k != "_id"}},
+        return_document=ReturnDocument.BEFORE,
+    )
+    if doc:
+        invalidate_cache(CACHE_KEY_SEGMENTS)
+        return _doc_to_segment(doc)
+    return None
+
+
 async def delete_segment(segment_id: str) -> bool:
     """Delete a segment by ID. Returns True if a document was deleted."""
     oid = _to_object_id(segment_id)
