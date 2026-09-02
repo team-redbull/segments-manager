@@ -1,13 +1,13 @@
-"""Input field validators for VLAN Manager.
+"""Input field validators for Segments Manager.
 
-Handles validation of basic input fields like site, VLAN ID, EPG name, cluster name, and description.
+Handles validation of basic input fields like site, VLAN ID, EPG name, and cluster name.
 """
 
 import logging
 import re
 from fastapi import HTTPException
 
-from ...config.settings import SITES
+from ...config.settings import SITES, resolve_site
 
 logger = logging.getLogger(__name__)
 
@@ -19,25 +19,13 @@ class InputValidators:
     def validate_site(site: str) -> None:
         """Validate if site is in configured sites (case-insensitive)"""
         logger.debug(f"Validating site: {site}")
-        # Normalize to lowercase for comparison (NetBox slugs are lowercase)
-        site_lower = site.lower()
-        sites_lower = [s.lower() for s in SITES]
-        if site_lower not in sites_lower:
+        # resolve_site owns the case-insensitive rule so this check and the pool
+        # lookup in validate_segment_format can never disagree about a site.
+        if resolve_site(site) is None:
             logger.warning(f"Invalid site: {site}, valid sites: {SITES}")
             raise HTTPException(
                 status_code=400,
                 detail=f"Invalid site. Must be one of: {SITES}"
-            )
-
-    @staticmethod
-    def validate_object_id(object_id: str) -> None:
-        """Validate ID format (simple validation for string IDs)"""
-        logger.debug(f"Validating ID: {object_id}")
-        if not object_id or not isinstance(object_id, str):
-            logger.warning(f"Invalid ID format: {object_id}")
-            raise HTTPException(
-                status_code=400,
-                detail="Invalid ID format"
             )
 
     @staticmethod
@@ -59,7 +47,7 @@ class InputValidators:
                 detail=f"EPG name too long (max 64 characters, got {len(epg_name)})"
             )
 
-        # Check for invalid characters (NetBox VLAN names have restrictions)
+        # Check for invalid characters (restrict to network-safe VLAN name chars)
         if not re.match(r'^[a-zA-Z0-9_\-\./]+$', epg_name):
             logger.warning(f"EPG name contains invalid characters: '{epg_name}'")
             raise HTTPException(
@@ -113,28 +101,4 @@ class InputValidators:
             raise HTTPException(
                 status_code=400,
                 detail="Cluster name can only contain letters, numbers, hyphens, underscores, and dots"
-            )
-
-    @staticmethod
-    def validate_description(description: str) -> None:
-        """Validate description field"""
-        if not description:
-            # Empty descriptions are allowed
-            return
-
-        logger.debug(f"Validating description: '{description[:50]}...'")
-
-        if len(description) > 500:
-            logger.warning(f"Description too long: {len(description)} characters")
-            raise HTTPException(
-                status_code=400,
-                detail=f"Description too long (max 500 characters, got {len(description)})"
-            )
-
-        # Check for control characters (except newlines and tabs)
-        if re.search(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]', description):
-            logger.warning("Description contains invalid control characters")
-            raise HTTPException(
-                status_code=400,
-                detail="Description contains invalid control characters"
             )

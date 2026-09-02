@@ -1,28 +1,32 @@
 """
-Database module - NetBox storage implementation
-
-Domain-named interface for segment operations.
+Database module — MongoDB storage implementation.
 """
 
-from .netbox_storage import init_storage, close_storage
-from .netbox_segments import (
+from .mongo_storage import init_storage, close_storage
+from .mongo_segments import (
+    STATUS_LOCKED,
+    STATUS_AVAILABLE,
+    STATUS_ALLOCATED,
     get_segments,
-    get_segment_by_id,
+    get_segment_by_segment,
     create_segment,
     update_segment,
+    convert_segment_type,
     delete_segment,
     allocate_segment,
-    get_vrfs,
 )
 
 __all__ = [
-    'init_storage',
-    'close_storage',
-    'get_segments',
-    'get_segment_by_id',
-    'create_segment',
-    'update_segment',
-    'delete_segment',
-    'allocate_segment',
-    'get_vrfs',
+    "init_storage",
+    "close_storage",
+    "STATUS_LOCKED",
+    "STATUS_AVAILABLE",
+    "STATUS_ALLOCATED",
+    "get_segments",
+    "get_segment_by_segment",
+    "create_segment",
+    "update_segment",
+    "convert_segment_type",
+    "delete_segment",
+    "allocate_segment",
 ]

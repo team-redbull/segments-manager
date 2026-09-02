@@ -6,10 +6,16 @@ Handles calculation of site statistics and utilization metrics.
 import logging
 from typing import Dict, Any, List
 
-from ...database.netbox_segments import get_segments
+from ...database import get_segments, STATUS_LOCKED, STATUS_AVAILABLE, STATUS_ALLOCATED
 from ...config.settings import SITES
 
 logger = logging.getLogger(__name__)
+
+# Segment types surfaced in the per-site usage breakdown, in display order.
+# Every SegmentType is listed: a type missing here is silently absent from the
+# site cards while its segments still exist, so the cards under-report the
+# site's real segment count.
+DISPLAY_TYPES = ["HC", "MCE", "INVENTORY", "PXE"]
 
 
 class StatisticsUtils:
@@ -19,24 +25,26 @@ class StatisticsUtils:
     async def get_site_statistics(site: str) -> Dict[str, Any]:
         """Get statistics for a specific site
 
-        Optimized to use single query instead of multiple count_documents calls.
+        Optimized to use a single query instead of multiple count calls.
         This is more efficient because:
-        1. Fetches data from cache (prefixes cached for 10 minutes)
-        2. Calculates counts in Python instead of additional API calls
-        3. Reduces load on NetBox
+        1. Fetches data from cache (segments cached briefly)
+        2. Calculates counts in Python instead of additional queries
+        3. Reduces load on the database
         """
-        # Single query instead of two count_documents calls
+        # Single query instead of two separate count calls
         segments = await get_segments(site=site)
 
         total_segments = len(segments)
-        allocated = sum(1 for s in segments
-                       if s.get("cluster_name") and not s.get("released", False))
+        allocated = sum(1 for s in segments if s.get("status") == STATUS_ALLOCATED)
+        available = sum(1 for s in segments if s.get("status") == STATUS_AVAILABLE)
+        locked = sum(1 for s in segments if s.get("status") == STATUS_LOCKED)
 
         return {
             "site": site,
             "total_segments": total_segments,
             "allocated": allocated,
-            "available": total_segments - allocated,
+            "available": available,
+            "locked": locked,
             "utilization": round((allocated / total_segments * 100) if total_segments > 0 else 0, 1)
         }
 
@@ -58,15 +66,30 @@ class StatisticsUtils:
         for site in SITES:
             site_segments = [s for s in all_segments if s.get("site") == site]
             total_segments = len(site_segments)
-            allocated = sum(1 for s in site_segments
-                           if s.get("cluster_name") and not s.get("released", False))
+            allocated = sum(1 for s in site_segments if s.get("status") == STATUS_ALLOCATED)
+            available = sum(1 for s in site_segments if s.get("status") == STATUS_AVAILABLE)
+            locked = sum(1 for s in site_segments if s.get("status") == STATUS_LOCKED)
+
+            # Per-type usage: allocated out of total for each displayed type.
+            by_type = []
+            for seg_type in DISPLAY_TYPES:
+                type_segments = [s for s in site_segments if s.get("type") == seg_type]
+                type_total = len(type_segments)
+                type_allocated = sum(1 for s in type_segments if s.get("status") == STATUS_ALLOCATED)
+                by_type.append({
+                    "type": seg_type,
+                    "allocated": type_allocated,
+                    "total": type_total,
+                })
 
             stats.append({
                 "site": site,
                 "total_segments": total_segments,
                 "allocated": allocated,
-                "available": total_segments - allocated,
-                "utilization": round((allocated / total_segments * 100) if total_segments > 0 else 0, 1)
+                "available": available,
+                "locked": locked,
+                "utilization": round((allocated / total_segments * 100) if total_segments > 0 else 0, 1),
+                "by_type": by_type
             })
 
         return stats

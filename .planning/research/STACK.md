@@ -1,6 +1,6 @@
 # Technology Stack: VLAN Scoping Bug Fix
 
-**Project:** VLAN Manager - NetBox VLAN Scoping Fix
+**Project:** Segments Manager - NetBox VLAN Scoping Fix
 **Researched:** 2026-03-27
 **Overall Confidence:** HIGH (verified against NetBox official docs + pynetbox docs + codebase analysis)
 

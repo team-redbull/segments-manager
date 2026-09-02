@@ -1,4 +1,4 @@
-# VLAN Manager - Comprehensive Code Analysis Report
+# Segments Manager - Comprehensive Code Analysis Report
 
 **Generated**: 2025-12-06
 **Scope**: All `src/` code except `src/database/` (recently refactored)
@@ -223,8 +223,8 @@ except Exception:
 ```python
 from pathlib import Path
 
-LOG_DIR = Path("/var/log/vlan-manager")  # Or from env var
-LOG_FILE = LOG_DIR / "vlan_manager.log"
+LOG_DIR = Path("/var/log/segments-manager")  # Or from env var
+LOG_FILE = LOG_DIR / "segments_manager.log"
 ```
 
 ---
@@ -735,7 +735,7 @@ async def test_bulk_validation_performance():
 
 ## 🏁 Conclusion
 
-The VLAN Manager codebase demonstrates **strong architectural patterns** with clean separation of concerns across API, services, validators, and configuration layers. The code is generally well-structured and production-ready **with critical fixes**.
+The Segments Manager codebase demonstrates **strong architectural patterns** with clean separation of concerns across API, services, validators, and configuration layers. The code is generally well-structured and production-ready **with critical fixes**.
 
 **Current Grade**: **8.0/10** (B+)
 

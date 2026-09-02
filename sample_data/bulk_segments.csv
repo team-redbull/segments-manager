@@ -1,30 +1,30 @@
-site,vlan_id,epg_name,segment,vrf,dhcp,description
-site1,100,EPG_PROD_01,192.1.1.0/24,Network1,true,Production segment
-site1,101,EPG_PROD_02,192.1.2.0/24,Network1,false,Production segment 2
-site1,102,EPG_PROD_03,192.1.3.0/24,Network1,true,Production segment 3
-site1,103,EPG_PROD_04,192.1.4.0/24,Network1,false,Production segment 4
-site1,110,EPG_STAGING_01,192.1.10.0/24,Network2,true,Staging environment
-site1,111,EPG_STAGING_02,192.1.11.0/24,Network2,false,Staging environment 2
-site1,112,EPG_STAGING_03,192.1.12.0/24,Network2,true,Staging environment 3
-site1,120,EPG_TEST_01,192.1.20.0/24,Network3,true,Test environment
-site1,121,EPG_TEST_02,192.1.21.0/24,Network3,false,Test environment 2
-site1,122,EPG_TEST_03,192.1.22.0/24,Network3,true,Test environment 3
-site2,200,EPG_/ipam/vlans/DEV_01,193.1.1.0/24,Network2,true,Development segment
-site2,201,EPG_DEV_02,193.1.2.0/24,Network2,false,Development segment 2
-site2,202,EPG_DEV_03,193.1.3.0/24,Network2,true,Development segment 3
-site2,203,EPG_DEV_04,193.1.4.0/24,Network2,false,Development segment 4
-site2,210,EPG_QA_01,193.1.10.0/24,Network1,true,QA environment
-site2,211,EPG_QA_02,193.1.11.0/24,Network1,false,QA environment 2
-site2,212,EPG_QA_03,193.1.12.0/24,Network1,true,QA environment 3
-site2,220,EPG_UAT_01,193.1.20.0/24,Network3,true,UAT environment
-site2,221,EPG_UAT_02,193.1.21.0/24,Network3,false,UAT environment 2
-site2,222,EPG_UAT_03,193.1.22.0/24,Network3,true,UAT environment 3
-site3,300,EPG_DR_01,194.1.1.0/24,Network1,true,Disaster Recovery segment
-site3,301,EPG_DR_02,194.1.2.0/24,Network1,false,Disaster Recovery segment 2
-site3,302,EPG_DR_03,194.1.3.0/24,Network1,true,Disaster Recovery segment 3
-site3,310,EPG_BACKUP_01,194.1.10.0/24,Network2,true,Backup environment
-site3,311,EPG_BACKUP_02,194.1.11.0/24,Network2,false,Backup environment 2
-site3,312,EPG_BACKUP_03,194.1.12.0/24,Network2,true,Backup environment 3
-site3,320,EPG_ARCHIVE_01,194.1.20.0/24,Network3,true,Archive environment
-site3,321,EPG_ARCHIVE_02,194.1.21.0/24,Network3,false,Archive environment 2
-site3,322,EPG_ARCHIVE_03,194.1.22.0/24,Network3,true,Archive environment 3
+site,vlan_id,epg_name,segment,dhcp
+site1,100,EPG_PROD_01,192.10.100.0/24,true
+site1,101,EPG_PROD_02,192.10.101.0/24,false
+site1,102,EPG_PROD_03,192.10.102.0/24,true
+site1,103,EPG_PROD_04,192.10.103.0/24,false
+site1,110,EPG_STAGING_01,192.10.110.0/24,true
+site1,111,EPG_STAGING_02,192.10.111.0/24,false
+site1,112,EPG_STAGING_03,192.10.112.0/24,true
+site1,120,EPG_TEST_01,192.10.120.0/24,true
+site1,121,EPG_TEST_02,192.10.121.0/24,false
+site1,122,EPG_TEST_03,192.10.122.0/24,true
+site2,200,EPG_/ipam/vlans/DEV_01,193.51.200.0/24,true
+site2,201,EPG_DEV_02,193.51.201.0/24,false
+site2,202,EPG_DEV_03,193.51.202.0/24,true
+site2,203,EPG_DEV_04,193.51.203.0/24,false
+site2,210,EPG_QA_01,193.51.210.0/24,true
+site2,211,EPG_QA_02,193.51.211.0/24,false
+site2,212,EPG_QA_03,193.51.212.0/24,true
+site2,220,EPG_UAT_01,193.51.220.0/24,true
+site2,221,EPG_UAT_02,193.51.221.0/24,false
+site2,222,EPG_UAT_03,193.51.222.0/24,true
+site3,300,EPG_DR_01,194.52.44.0/24,true
+site3,301,EPG_DR_02,194.52.45.0/24,false
+site3,302,EPG_DR_03,194.52.46.0/24,true
+site3,310,EPG_BACKUP_01,194.52.54.0/24,true
+site3,311,EPG_BACKUP_02,194.52.55.0/24,false
+site3,312,EPG_BACKUP_03,194.52.56.0/24,true
+site3,320,EPG_ARCHIVE_01,194.52.64.0/24,true
+site3,321,EPG_ARCHIVE_02,194.52.65.0/24,false
+site3,322,EPG_ARCHIVE_03,194.52.66.0/24,true

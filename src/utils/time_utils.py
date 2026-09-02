@@ -1,4 +1,4 @@
-"""Time utility functions for VLAN Manager"""
+"""Time utility functions for Segments Manager"""
 
 from datetime import datetime, timezone
 

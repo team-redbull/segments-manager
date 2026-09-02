@@ -1,324 +1,457 @@
 import logging
+from datetime import datetime
 from typing import Optional, List, Dict, Any
 from fastapi import HTTPException
 
+from ..database import STATUS_LOCKED, STATUS_AVAILABLE, STATUS_ALLOCATED
 from ..models.schemas import Segment
 from ..utils.database_utils import DatabaseUtils
 from ..utils.validators import Validators
-from ..utils.error_handlers import handle_netbox_errors, retry_on_network_error
+from ..utils.error_handlers import handle_db_errors, retry_on_network_error
 from ..utils.logging_decorators import log_operation_timing
+from ..utils.time_utils import get_current_utc
 
 logger = logging.getLogger(__name__)
 
 class SegmentService:
     """Service class for segment management operations"""
-    
+
     @staticmethod
-    async def _validate_segment_data(segment: Segment, exclude_id: str = None) -> None:
+    async def _validate_segment_data(segment: Segment) -> None:
         """Common validation for segment data"""
-        # Basic field validation
         Validators.validate_site(segment.site)
-        await Validators.validate_vrf(segment.vrf)  # VRF validation (async)
         Validators.validate_epg_name(segment.epg_name)
         Validators.validate_vlan_id(segment.vlan_id)
 
-        # Network validation (with network-specific site prefix)
-        Validators.validate_segment_format(segment.segment, segment.site, segment.vrf)
+        Validators.validate_segment_format(segment.segment, segment.site)
         Validators.validate_subnet_mask(segment.segment)
         Validators.validate_no_reserved_ips(segment.segment)
         Validators.validate_network_broadcast_gateway(segment.segment)
 
-        # Description validation
-        if segment.description:
-            Validators.validate_description(segment.description)
-
-        # IP overlap validation - get all existing segments
         existing_segments = await DatabaseUtils.get_segments_with_filters()
-        if exclude_id:
-            # Exclude the segment being updated
-            existing_segments = [s for s in existing_segments if str(s.get("_id")) != str(exclude_id)]
 
         Validators.validate_ip_overlap(segment.segment, existing_segments)
 
-        # EPG name uniqueness validation (scoped to network+site)
         Validators.validate_vlan_name_uniqueness(
             site=segment.site,
-            vrf=segment.vrf,
             epg_name=segment.epg_name,
             vlan_id=segment.vlan_id,
-            existing_segments=existing_segments,
-            exclude_id=exclude_id
+            existing_segments=existing_segments
         )
-    
+
+    @staticmethod
+    async def _get_segment_or_404(segment_value: str) -> Dict[str, Any]:
+        """Resolve a segment document by its CIDR value (the natural key).
+
+        The `segment` field is unique (unique index) and immutable, so it is
+        the public identifier for all single-segment API operations — callers
+        never need the internal Mongo ObjectId.
+        """
+        doc = await DatabaseUtils.get_segment_by_segment(segment_value.strip())
+        if not doc:
+            raise HTTPException(status_code=404, detail="Segment not found")
+        return doc
+
     @staticmethod
     def _segment_to_dict(segment: Segment) -> Dict[str, Any]:
         """Convert segment object to dictionary"""
         return {
+            "type": segment.type,
             "site": segment.site,
             "vlan_id": segment.vlan_id,
             "epg_name": segment.epg_name,
             "segment": segment.segment,
-            "vrf": segment.vrf,
-            "dhcp": segment.dhcp,
-            "description": segment.description
+            "dhcp": segment.dhcp
         }
-    
+
     @staticmethod
-    @handle_netbox_errors
+    @handle_db_errors
     @retry_on_network_error(max_retries=3)
     @log_operation_timing("get_segments", threshold_ms=1000)
-    async def get_segments(site: Optional[str] = None, allocated: Optional[bool] = None) -> List[Dict[str, Any]]:
+    async def get_segments(
+        site: Optional[str] = None,
+        status: Optional[str] = None,
+        type: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
         """Get segments with optional filters"""
-        segments = await DatabaseUtils.get_segments_with_filters(site, allocated)
+        segments = await DatabaseUtils.get_segments_with_filters(site, status, type)
         logger.debug(f"Retrieved {len(segments)} segments")
         return segments
-    
+
     @staticmethod
-    @handle_netbox_errors
+    @handle_db_errors
     @retry_on_network_error(max_retries=3)
     @log_operation_timing("search_segments", threshold_ms=1000)
     async def search_segments(
         search_query: str,
         site: Optional[str] = None,
-        allocated: Optional[bool] = None
+        status: Optional[str] = None
     ) -> List[Dict[str, Any]]:
-        """Search segments by cluster name, EPG name, VLAN ID, description, or segment"""
-        segments = await DatabaseUtils.search_segments(search_query, site, allocated)
+        """Search segments by cluster name, EPG name, VLAN ID, or segment"""
+        segments = await DatabaseUtils.search_segments(search_query, site, status)
         logger.debug(f"Found {len(segments)} matching segments for query '{search_query}'")
         return segments
-    
+
     @staticmethod
-    @handle_netbox_errors
+    @handle_db_errors
     @retry_on_network_error(max_retries=3)
     @log_operation_timing("create_segment", threshold_ms=2000)
     async def create_segment(segment: Segment) -> Dict[str, str]:
         """Create a new segment"""
         logger.info(f"Creating segment: site={segment.site}, vlan_id={segment.vlan_id}, epg={segment.epg_name}")
 
-        # Validate segment data
         await SegmentService._validate_segment_data(segment)
 
-        # Check if VLAN ID already exists for this (network, site) combination
-        if await DatabaseUtils.check_vlan_exists(segment.site, segment.vlan_id, segment.vrf):
+        if await DatabaseUtils.check_vlan_exists(segment.site, segment.vlan_id):
             raise HTTPException(
                 status_code=400,
-                detail=f"VLAN {segment.vlan_id} already exists for network '{segment.vrf}' at site '{segment.site}'"
+                detail=f"VLAN {segment.vlan_id} already exists at site '{segment.site}'"
             )
 
-        # Create the segment
         segment_data = SegmentService._segment_to_dict(segment)
         segment_id = await DatabaseUtils.create_segment(segment_data)
 
         logger.info(f"Created segment with ID: {segment_id}")
+
         return {"message": "Segment created", "id": segment_id}
-    
+
     @staticmethod
-    @handle_netbox_errors
+    @handle_db_errors
     @retry_on_network_error(max_retries=3)
-    @log_operation_timing("get_segment_by_id", threshold_ms=500)
-    async def get_segment_by_id(segment_id: str) -> Dict[str, Any]:
-        """Get a single segment by ID"""
-        # Validate ObjectId format
-        Validators.validate_object_id(segment_id)
-
-        # Get the segment
-        segment = await DatabaseUtils.get_segment_by_id(segment_id)
-        if not segment:
-            raise HTTPException(status_code=404, detail="Segment not found")
-
-        # Convert ObjectId to string (if not already a string)
-        if not isinstance(segment["_id"], str):
-            segment["_id"] = str(segment["_id"])
-
-        logger.debug(f"Retrieved segment {segment_id}: site={segment.get('site')}, vlan_id={segment.get('vlan_id')}")
+    @log_operation_timing("get_segment_by_segment", threshold_ms=500)
+    async def get_segment_by_segment(segment_value: str) -> Dict[str, Any]:
+        """Get a single segment by its CIDR value (the natural key)"""
+        segment = await SegmentService._get_segment_or_404(segment_value)
+        logger.debug(f"Retrieved segment {segment_value}: site={segment.get('site')}, vlan_id={segment.get('vlan_id')}")
         return segment
-    
+
     @staticmethod
-    @handle_netbox_errors
+    @handle_db_errors
     @retry_on_network_error(max_retries=3)
-    @log_operation_timing("update_segment", threshold_ms=2000)
-    async def update_segment(segment_id: str, updated_segment: Segment) -> Dict[str, str]:
-        """Update a segment"""
-        # Validate ObjectId format
-        Validators.validate_object_id(segment_id)
+    @log_operation_timing("update_segment_dhcp", threshold_ms=2000)
+    async def update_segment_dhcp(segment_value: str, dhcp: bool) -> Dict[str, str]:
+        """Update a segment's DHCP flag — the only in-place-editable segment field.
 
-        # Validate segment data (exclude self from overlap check)
-        await SegmentService._validate_segment_data(updated_segment, exclude_id=segment_id)
+        Identity fields (site, vlan_id, epg_name, segment) are immutable after
+        creation; `type` changes only through conversion (update_segment_type);
+        lifecycle fields (status, cluster_name, ...) are managed by their own
+        endpoints. Idempotent: setting the current value is a no-op.
+        """
+        existing_segment = await SegmentService._get_segment_or_404(segment_value)
 
-        # Check if segment exists
-        existing_segment = await DatabaseUtils.get_segment_by_id(segment_id)
-        if not existing_segment:
-            raise HTTPException(status_code=404, detail="Segment not found")
+        if existing_segment.get("dhcp") == dhcp:
+            return {"message": "Segment already up to date"}
 
-        # VLAN ID is immutable - cannot be changed after creation
-        if existing_segment["vlan_id"] != updated_segment.vlan_id:
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "error": "vlan_id_immutable",
-                    "message": f"VLAN ID cannot be changed after creation",
-                    "current_vlan_id": existing_segment["vlan_id"],
-                    "attempted_vlan_id": updated_segment.vlan_id,
-                    "suggestion": "Create a new segment with the desired VLAN ID and delete the old one if needed"
-                }
-            )
-
-        # Check if site or VRF change would conflict (VLAN ID is already immutable)
-        existing_vrf = existing_segment.get("vrf")
-        if (existing_segment["site"] != updated_segment.site or
-            existing_vrf != updated_segment.vrf):
-            if await DatabaseUtils.check_vlan_exists_excluding_id(updated_segment.site, updated_segment.vlan_id, segment_id, updated_segment.vrf):
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"VLAN {updated_segment.vlan_id} already exists for network '{updated_segment.vrf}' at site '{updated_segment.site}'"
-                )
-
-        # Update the segment
-        update_data = SegmentService._segment_to_dict(updated_segment)
-        success = await DatabaseUtils.update_segment_by_id(segment_id, update_data)
-
+        success = await DatabaseUtils.update_segment_by_id(str(existing_segment["_id"]), {"dhcp": dhcp})
         if not success:
             raise HTTPException(status_code=500, detail="Failed to update segment")
 
-        logger.info(f"Updated segment {segment_id}")
+        logger.info(f"Updated segment {segment_value}: dhcp={dhcp}")
         return {"message": "Segment updated successfully"}
 
     @staticmethod
-    @handle_netbox_errors
+    @handle_db_errors
+    @retry_on_network_error(max_retries=3)
+    @log_operation_timing("update_segment_type", threshold_ms=2000)
+    async def update_segment_type(
+        segment_value: str, new_type: str, expected_type: Optional[str] = None
+    ) -> Dict[str, str]:
+        """Convert a segment to another type (status returns to "Locked").
+
+        A converted segment needs its firewall rules re-opened for the new
+        type, so conversion resets the segment to the same state a freshly
+        created one starts in: status "Locked" (excluded from allocation until
+        the segment-connectivity orchestrator unlocks it) with every
+        segment_connectivity_* field cleared — the pending request ids belong
+        to the OLD type's firewall requests and would otherwise linger in the
+        UI, and a stale "Workflow failed" note has no other clearing path.
+
+        Guards: an "Allocated" segment is in use and is never converted (409).
+        With `expected_type` set, a stored type that matches neither the new
+        type nor `expected_type` is a conversion race — refused (409).
+        Idempotent: repeating a completed conversion converges to the same
+        state (and never re-locks a segment whose lifecycle has moved on to
+        "Allocated").
+
+        Both guards are applied ATOMICALLY, in the update's own filter. They
+        used to be a read, a check and then a write, which is not a
+        compare-and-set: two conversions racing for one segment both read the
+        old type, both passed the check and both wrote, so both callers were
+        answered "updated" while only the last write survived. Whatever the
+        filter does not match is diagnosed afterwards, from a fresh read, to
+        pick the right status code.
+        """
+        converted_state: Dict[str, Any] = {
+            "type": new_type,
+            "status": STATUS_LOCKED,
+            "segment_connectivity_requests": None,
+            "segment_connectivity_requests_submitted_at": None,
+            "segment_connectivity_failure": None,
+            "segment_connectivity_failure_at": None,
+        }
+        # Which stored types may be converted FROM. `new_type` is always
+        # allowed so a repeated call converges instead of conflicting; without
+        # expected_type there is no compare-and-set and any type converts.
+        allowed_from_types = (
+            [expected_type, new_type] if expected_type is not None else None
+        )
+
+        previous_segment = await DatabaseUtils.convert_segment_type(
+            segment_value, converted_state, allowed_from_types
+        )
+        if previous_segment is not None:
+            if all(
+                previous_segment.get(key) == value
+                for key, value in converted_state.items()
+            ):
+                return {"message": "Segment already up to date"}
+            logger.info(
+                f"Converted segment {segment_value}: type "
+                f"{previous_segment.get('type')} -> {new_type} (status: {STATUS_LOCKED})"
+            )
+            return {"message": "Segment type updated"}
+
+        # Nothing matched — read back to say why (404 / allocated / lost race).
+        existing_segment = await SegmentService._get_segment_or_404(segment_value)
+        current_type = existing_segment.get("type")
+        if current_type == new_type and existing_segment.get("status") == STATUS_ALLOCATED:
+            # The conversion is already done and the segment has moved on to
+            # "Allocated" — converged, and deliberately never re-locked.
+            return {"message": "Segment already up to date"}
+        if expected_type is not None and current_type not in (expected_type, new_type):
+            raise HTTPException(
+                status_code=409,
+                detail=f"Segment type is '{current_type}', expected '{expected_type}'"
+            )
+        if existing_segment.get("status") == STATUS_ALLOCATED:
+            raise HTTPException(status_code=409, detail="Cannot convert allocated segment")
+        # The segment satisfies the guard now but did not when the atomic
+        # update ran: it changed underneath us, which is the race itself.
+        raise HTTPException(
+            status_code=409,
+            detail=f"Segment {segment_value} changed during conversion — retry"
+        )
+
+    @staticmethod
+    @handle_db_errors
     @retry_on_network_error(max_retries=3)
     @log_operation_timing("update_segment_clusters", threshold_ms=2000)
-    async def update_segment_clusters(segment_id: str, cluster_names: str) -> Dict[str, str]:
-        """Update cluster assignment for a segment (for shared segments)"""
-        from datetime import datetime, timezone
-        logger.info(f"Updating cluster assignment for segment: {segment_id}")
+    async def update_segment_clusters(segment_value: str, cluster_name: Optional[str]) -> Dict[str, str]:
+        """Assign a segment to a single cluster, or release it (empty/omitted).
 
-        # Validate ObjectId format
-        Validators.validate_object_id(segment_id)
+        One segment belongs to at most one cluster — there is no shared
+        (comma-separated) form.
+        """
+        logger.info(f"Updating cluster assignment for segment: {segment_value}")
 
-        # Check if segment exists
-        existing_segment = await DatabaseUtils.get_segment_by_id(segment_id)
-        if not existing_segment:
-            logger.warning(f"Segment not found: {segment_id}")
-            raise HTTPException(status_code=404, detail="Segment not found")
+        existing_segment = await SegmentService._get_segment_or_404(segment_value)
+        segment_id = str(existing_segment["_id"])
 
-        # Clean up cluster names
-        clean_cluster_names = cluster_names.strip() if cluster_names else None
+        clean_cluster_name = cluster_name.strip() if cluster_name else None
 
-        # Update the segment cluster assignment
-        update_data = {}
-        if clean_cluster_names:
-            # Validate cluster names format (comma-separated, no special chars)
-            cluster_list = [name.strip() for name in clean_cluster_names.split(",")]
-            validated_clusters = []
-            for cluster in cluster_list:
-                if cluster and cluster.replace("-", "").replace("_", "").isalnum():
-                    validated_clusters.append(cluster)
-
-            if validated_clusters:
-                update_data["cluster_name"] = ",".join(validated_clusters)
-                update_data["allocated_at"] = datetime.now(timezone.utc)
-                update_data["released"] = False
-                update_data["released_at"] = None
-            else:
-                # No valid clusters, release the segment
-                update_data["cluster_name"] = None
-                update_data["released"] = True
-                update_data["released_at"] = datetime.now(timezone.utc)
+        if clean_cluster_name:
+            Validators.validate_cluster_name(clean_cluster_name)
+            update_data = {
+                "cluster_name": clean_cluster_name,
+                "allocated_at": get_current_utc(),
+            }
         else:
-            # Empty cluster names, release the segment
-            update_data["cluster_name"] = None
-            update_data["released"] = True
-            update_data["released_at"] = datetime.now(timezone.utc)
+            update_data = {"cluster_name": None}
+
+        # Keep `status` consistent with the cluster assignment — an edit here is
+        # an allocation change like any other. A Locked segment stays Locked:
+        # only the orchestrator's unlock step (POST /api/segments/unlock) may
+        # leave that state, and the lifecycle is one-way from there.
+        if existing_segment.get("status") != STATUS_LOCKED:
+            update_data["status"] = STATUS_ALLOCATED if clean_cluster_name else STATUS_AVAILABLE
 
         success = await DatabaseUtils.update_segment_by_id(segment_id, update_data)
 
         if not success:
             raise HTTPException(status_code=500, detail="Failed to update segment clusters")
 
-        logger.info(f"Updated cluster assignment for segment {segment_id}")
+        logger.info(f"Updated cluster assignment for segment {segment_value}")
         return {"message": "Segment cluster assignment updated successfully"}
 
     @staticmethod
-    @handle_netbox_errors
+    @handle_db_errors
+    @retry_on_network_error(max_retries=3)
+    @log_operation_timing("set_segment_connectivity_requests", threshold_ms=2000)
+    async def set_segment_connectivity_requests(
+        segment_value: str, request_ids: List[int], submitted_at: Optional[datetime] = None
+    ) -> Dict[str, str]:
+        """Replace the pending segment-connectivity request ids displayed for a segment.
+
+        Set by the segment-connectivity orchestrator while its firewall (open-rules)
+        requests await approval; the UI shows the ids beside the segment's
+        status, with `submitted_at` driving the "time since submit" header in
+        the popover. An empty list clears the display (all requests completed).
+        Idempotent: setting the current value is a no-op.
+        """
+        existing_segment = await SegmentService._get_segment_or_404(segment_value)
+
+        new_value = request_ids or None
+        new_submitted_at = submitted_at if new_value else None
+        # A fresh submission (non-empty ids) supersedes any prior failure note:
+        # re-triggering the workflow is exactly the operator's recovery path, so
+        # clearing the "Workflow failed" note here keeps the row consistent.
+        has_failure = existing_segment.get("segment_connectivity_failure") is not None
+        clear_failure = bool(new_value) and has_failure
+        if (
+            existing_segment.get("segment_connectivity_requests") == new_value
+            and existing_segment.get("segment_connectivity_requests_submitted_at") == new_submitted_at
+            and not clear_failure
+        ):
+            return {"message": "Segment already up to date"}
+
+        update: Dict[str, Any] = {
+            "segment_connectivity_requests": new_value,
+            "segment_connectivity_requests_submitted_at": new_submitted_at,
+        }
+        if clear_failure:
+            update["segment_connectivity_failure"] = None
+            update["segment_connectivity_failure_at"] = None
+
+        success = await DatabaseUtils.update_segment_by_id(
+            str(existing_segment["_id"]), update
+        )
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to update segment")
+
+        logger.info(f"Updated segment {segment_value}: segment_connectivity_requests={new_value}")
+        return {"message": "Segment-connectivity requests updated"}
+
+    @staticmethod
+    @handle_db_errors
+    @retry_on_network_error(max_retries=3)
+    @log_operation_timing("set_segment_connectivity_failure", threshold_ms=2000)
+    async def set_segment_connectivity_failure(
+        segment_value: str, message: str
+    ) -> Dict[str, str]:
+        """Record a terminal segment-connectivity-workflow failure for a segment.
+
+        Set by the segment-connectivity orchestrator when its firewall (open-rules)
+        workflow fails or is cancelled after submission. The UI shows a
+        "Workflow failed" note beside the segment's status (the segment stays
+        Locked — segment-connectivity was never established); `segment_connectivity_failure_at`
+        drives the "N ago" header in the popover. Cleared automatically when a
+        fresh set of request ids is published (see set_segment_connectivity_requests).
+        Idempotent: re-recording the same message is a no-op.
+        """
+        existing_segment = await SegmentService._get_segment_or_404(segment_value)
+
+        if existing_segment.get("segment_connectivity_failure") == message:
+            return {"message": "Segment already up to date"}
+
+        success = await DatabaseUtils.update_segment_by_id(
+            str(existing_segment["_id"]),
+            {
+                "segment_connectivity_failure": message,
+                "segment_connectivity_failure_at": get_current_utc(),
+            },
+        )
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to update segment")
+
+        logger.info(f"Recorded segment-connectivity failure for segment {segment_value}")
+        return {"message": "Segment-connectivity failure recorded"}
+
+    @staticmethod
+    @handle_db_errors
+    @retry_on_network_error(max_retries=3)
+    @log_operation_timing("unlock_segment_by_segment", threshold_ms=2000)
+    async def unlock_segment_by_segment(segment: str) -> Dict[str, str]:
+        """Unlock a segment identified by its CIDR value (status "Locked" -> "Available").
+
+        "Locked" is the initial status of every new segment (firewall rules
+        not yet open), and segments are excluded from automatic VLAN
+        allocation until unlocked. Intended for callers (e.g. the
+        segment-connectivity orchestrator) that know the network value. This is a
+        one-way lifecycle transition — segments cannot be re-locked via the
+        API. Idempotent: unlocking a segment that is already "Available" (or
+        "Allocated") is a no-op.
+        """
+        existing_segment = await SegmentService._get_segment_or_404(segment)
+
+        if existing_segment.get("status") != STATUS_LOCKED:
+            return {"message": "Segment already unlocked"}
+
+        segment_id = str(existing_segment["_id"])
+        success = await DatabaseUtils.update_segment_by_id(segment_id, {"status": STATUS_AVAILABLE})
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to unlock segment")
+
+        logger.info(f"Segment {segment} unlocked (status: {STATUS_LOCKED} -> {STATUS_AVAILABLE})")
+        return {"message": "Segment unlocked successfully"}
+
+    @staticmethod
+    @handle_db_errors
     @retry_on_network_error(max_retries=3)
     @log_operation_timing("delete_segment", threshold_ms=2000)
-    async def delete_segment(segment_id: str) -> Dict[str, str]:
-        """Delete a segment"""
-        # Validate ObjectId format
-        Validators.validate_object_id(segment_id)
+    async def delete_segment(segment_value: str) -> Dict[str, str]:
+        """Delete a segment identified by its CIDR value"""
+        segment = await SegmentService._get_segment_or_404(segment_value)
 
-        # Check if segment exists and is not allocated
-        segment = await DatabaseUtils.get_segment_by_id(segment_id)
-        if not segment:
-            raise HTTPException(status_code=404, detail="Segment not found")
-
-        # Validate segment can be deleted
         Validators.validate_segment_not_allocated(segment)
 
-        # Delete the segment
-        success = await DatabaseUtils.delete_segment_by_id(segment_id)
+        success = await DatabaseUtils.delete_segment_by_id(str(segment["_id"]))
         if not success:
             raise HTTPException(status_code=500, detail="Failed to delete segment")
 
-        logger.info(f"Deleted segment {segment_id}")
+        logger.info(f"Deleted segment {segment_value}")
         return {"message": "Segment deleted"}
-    
+
     @staticmethod
-    @handle_netbox_errors
-    @retry_on_network_error(max_retries=2)  # Fewer retries for bulk operations
-    @log_operation_timing("create_segments_bulk", threshold_ms=10000)  # Higher threshold for bulk
+    @handle_db_errors
+    @retry_on_network_error(max_retries=2)
+    @log_operation_timing("create_segments_bulk", threshold_ms=10000)
     async def create_segments_bulk(segments: List[Segment]) -> Dict[str, Any]:
-        """Create multiple segments at once - OPTIMIZED: fetches existing segments once"""
+        """Create multiple segments at once - fetches existing segments once for all validations"""
         logger.info(f"Bulk creating {len(segments)} segments")
 
         if not segments or len(segments) == 0:
             logger.warning("Bulk create called with empty segments list")
-            raise HTTPException(status_code=400, detail="No valid segments found in CSV data. Please check the format: site,vlan_id,epg_name,segment,vrf,dhcp,description")
+            raise HTTPException(
+                status_code=400,
+                detail="No valid segments found in CSV data. Please check the format: site,vlan_id,epg_name,segment,dhcp"
+            )
 
         try:
-            # OPTIMIZATION: Fetch existing segments ONCE for all validations
             existing_segments = await DatabaseUtils.get_segments_with_filters()
 
             created = 0
             errors = []
-            # Track created segments within this bulk operation to detect duplicates in CSV
             created_in_bulk = set()
 
             for idx, segment in enumerate(segments, start=1):
                 try:
-                    logger.debug(f"Processing segment {idx}/{len(segments)}: site={segment.site}, vlan_id={segment.vlan_id}, segment={segment.segment}")
+                    logger.debug(f"Processing segment {idx}/{len(segments)}: site={segment.site}, vlan_id={segment.vlan_id}")
 
-                    # Check for duplicates within this bulk request first (network+site+vlan scope)
-                    segment_key = (segment.vrf, segment.site, segment.vlan_id)
+                    # Check for duplicates within this bulk request (site+vlan scope)
+                    segment_key = (segment.site, segment.vlan_id)
                     if segment_key in created_in_bulk:
-                        error_msg = f"Duplicate entry: VLAN {segment.vlan_id} for network '{segment.vrf}' at site '{segment.site}' appears multiple times in CSV"
+                        error_msg = f"Duplicate entry: VLAN {segment.vlan_id} at site '{segment.site}' appears multiple times in CSV"
                         logger.warning(f"Row {idx}: {error_msg}")
                         errors.append(error_msg)
                         continue
 
-                    # Validate segment data (uses pre-fetched existing_segments, passed via closure)
                     await SegmentService._validate_segment_data(segment)
 
-                    # Check if VLAN ID already exists - check in cached existing_segments
+                    # Check if VLAN ID already exists at this site
                     vlan_exists = any(
-                        s.get("site") == segment.site and
-                        s.get("vlan_id") == segment.vlan_id and
-                        s.get("vrf") == segment.vrf
+                        s.get("site") == segment.site and s.get("vlan_id") == segment.vlan_id
                         for s in existing_segments
                     )
                     if vlan_exists:
-                        error_msg = f"VLAN {segment.vlan_id} already exists for network '{segment.vrf}' at site '{segment.site}'"
+                        error_msg = f"VLAN {segment.vlan_id} already exists at site '{segment.site}'"
                         logger.warning(f"Row {idx}: {error_msg}")
                         errors.append(error_msg)
                         continue
 
-                    # Create the segment
                     segment_data = SegmentService._segment_to_dict(segment)
                     new_segment = await DatabaseUtils.create_segment(segment_data)
 
-                    # Add to tracking sets
                     created_in_bulk.add(segment_key)
-                    # Update cached existing_segments for next iteration
                     existing_segments.append(new_segment if isinstance(new_segment, dict) else segment_data)
                     created += 1
                     logger.debug(f"Successfully created segment {idx}: site={segment.site}, vlan_id={segment.vlan_id}")
@@ -345,13 +478,3 @@ class SegmentService:
         except Exception as e:
             logger.error(f"Error in bulk creation: {e}", exc_info=True)
             raise HTTPException(status_code=500, detail=str(e))
-
-    @staticmethod
-    @handle_netbox_errors
-    @retry_on_network_error(max_retries=3)
-    @log_operation_timing("get_vrfs", threshold_ms=1000)
-    async def get_vrfs() -> Dict[str, Any]:
-        """Get list of available VRFs from NetBox"""
-        vrfs = await DatabaseUtils.get_vrfs()
-        logger.debug(f"Retrieved {len(vrfs)} VRFs")
-        return {"vrfs": vrfs}

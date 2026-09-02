@@ -1,16 +1,16 @@
 #!/bin/bash
 
-# VLAN Manager - Build and Save Container Image
+# Segments Manager - Build and Save Container Image
 # This script builds the container image and saves it for air-gapped deployment
 
 set -e
 
-PROJECT_NAME="vlan-manager"
-IMAGE_NAME="vlan-manager"
+PROJECT_NAME="segments-manager"
+IMAGE_NAME="segments-manager"
 IMAGE_TAG="${1:-latest}"
 SAVE_DIR="$(dirname "$0")/../images"
 
-echo "🏗️  VLAN Manager - Build and Save Container Image"
+echo "🏗️  Segments Manager - Build and Save Container Image"
 echo "=================================================="
 
 # Check if podman is available
@@ -74,14 +74,12 @@ if [ $? -eq 0 ]; then
 
 ## Environment Variables Required
 \`\`\`
-# NetBox Connection (Required)
-NETBOX_URL=https://your-netbox-instance.com
-NETBOX_TOKEN=your-api-token-here
-NETBOX_SSL_VERIFY=true
+# MongoDB Connection (Required)
+MONGODB_URL=mongodb://user:pass@mongodb-host:27017
+MONGODB_DB_NAME=segments_manager
 
 # Site Configuration (Required)
-SITES=site1,site2,site3
-SITE_PREFIXES=site1:192,site2:193,site3:194
+SITE_NETWORKS='{"site1": {"pool": "192.10.0.0/16", "bmc": "10.50.0.0/16"}, "site2": {"pool": "193.51.0.0/16", "bmc": "10.51.0.0/16"}, "site3": {"pool": "194.52.0.0/16", "bmc": "10.52.0.0/16"}}'
 
 # Server Configuration (Optional)
 SERVER_HOST=0.0.0.0

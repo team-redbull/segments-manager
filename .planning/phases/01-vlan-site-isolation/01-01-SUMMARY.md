@@ -77,7 +77,7 @@ Each task was committed atomically:
 
 ## Decisions Made
 - **Group resolution first:** The old code resolved the group as a fallback after a global vid-only lookup. The new code resolves the group unconditionally as the first operation. This is the minimal change that eliminates the bug.
-- **No migration logic in app:** Existing unscoped VLANs are NOT touched by the application — operators must delete and recreate segments via VLAN Manager. The audit script identifies what needs remediation.
+- **No migration logic in app:** Existing unscoped VLANs are NOT touched by the application — operators must delete and recreate segments via Segments Manager. The audit script identifies what needs remediation.
 - **HTTP 400 over silent fallback:** A call without site_slug/vrf_name now raises HTTP 400 immediately rather than creating a VLAN with no group. This makes misconfiguration loud instead of silent.
 
 ## Deviations from Plan

@@ -1,8 +1,8 @@
-# VLAN Manager
+# Segments Manager
 
 ## What This Is
 
-VLAN Manager is a production-grade network VLAN allocation and management system that provides an intelligent API layer on top of NetBox IPAM. It manages VLAN segments across multiple sites and VRFs, where each VRF+Site combination has its own IP prefix space. The system automates VLAN segment allocation, enforces uniqueness constraints per VRF+Site scope, and exposes a FastAPI REST API with a web UI.
+Segments Manager is a production-grade network VLAN allocation and management system that provides an intelligent API layer on top of NetBox IPAM. It manages VLAN segments across multiple sites and VRFs, where each VRF+Site combination has its own IP prefix space. The system automates VLAN segment allocation, enforces uniqueness constraints per VRF+Site scope, and exposes a FastAPI REST API with a web UI.
 
 ## Core Value
 

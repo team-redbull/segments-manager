@@ -1,6 +1,6 @@
 # Project Structure
 
-This document describes the organization of the VLAN Manager project directory.
+This document describes the organization of the Segments Manager project directory.
 
 ## Directory Layout
 
@@ -51,8 +51,9 @@ segments_2/
 │   └── bulk_segments_selected.csv
 │
 ├── scripts/                   # Utility scripts
-│   ├── create_netbox_resources.py
-│   └── allocate-vlan-ci.sh
+│   ├── audit_site_pools.py
+│   ├── migrate_drop_shared_clusters.py
+│   └── migrate_segment_connectivity_fields.py
 │
 ├── deploy/                    # Deployment configurations
 │   ├── helm/                 # Kubernetes Helm chart
@@ -196,7 +197,7 @@ python tests/test_comprehensive.py
 ## Notes
 
 - Virtual environment (`.venv/`) is at project root (not committed to git)
-- Log file (`vlan_manager.log`) is at project root (not committed to git)
+- Log file (`segments_manager.log`) is at project root (not committed to git)
 - Git ignores: `.venv/`, `__pycache__/`, `*.pyc`, `.env`, `logs/`, `*.log`
 
 ---

@@ -1,4 +1,4 @@
-"""Constants and configuration values for VLAN Manager.
+"""Constants and configuration values for Segments Manager.
 
 Centralizes all magic numbers, status values, and configuration constants
 used throughout the application.
@@ -12,33 +12,6 @@ class CacheTTL:
     LONG = 3600      # 1 hour - for rarely changing data
 
 
-class NetBoxStatus:
-    """NetBox prefix status values"""
-    ACTIVE = "active"       # Available for allocation
-    RESERVED = "reserved"   # Allocated to a cluster
-
-
-class NetBoxRole:
-    """NetBox role names"""
-    DATA = "Data"          # Data role for prefixes and VLANs
-
-
-class CustomFields:
-    """NetBox custom field names"""
-    CLUSTER = "Cluster"    # Cluster allocation field
-    DHCP = "DHCP"          # DHCP enabled/disabled field
-
-
-class NetBoxScope:
-    """NetBox scope type values"""
-    SITE_GROUP = "dcim.sitegroup"  # Site group scope type
-
-
-class Tenant:
-    """Tenant configuration"""
-    DEFAULT = "RedBull"    # Default tenant name
-
-
 class VLANConstraints:
     """VLAN ID constraints"""
     MIN_ID = 1
@@ -47,10 +20,12 @@ class VLANConstraints:
 
 
 class SubnetConstraints:
-    """Subnet mask constraints"""
+    """Subnet mask constraints. Enforced by NetworkValidators.validate_subnet_mask."""
+    # /16 mirrors the widest supported site pool: a segment can at most fill its
+    # site's whole pool, so nothing larger can pass containment anyway.
     MIN_PREFIX_LENGTH = 16   # /16 - Largest allowed subnet
-    MAX_PREFIX_LENGTH = 29   # /29 - Smallest practical subnet
-    MIN_ADDRESSES = 4        # Minimum addresses for a usable network
+    MAX_PREFIX_LENGTH = 31   # /31 - Smallest allowed (point-to-point, RFC 3021)
+    MIN_ADDRESSES = 2        # Minimum addresses for a usable network
 
 
 class FieldLengths:
@@ -63,15 +38,9 @@ class FieldLengths:
 
 class PerformanceThresholds:
     """Performance monitoring thresholds in milliseconds"""
-    NETBOX_SLOW_WARNING = 5000      # Warn if NetBox call > 5 seconds
-    NETBOX_SEVERE_WARNING = 20000   # Error if NetBox call > 20 seconds
-    OPERATION_SLOW = 100            # Warn if operation > 100ms
-
-
-class ExecutorConfig:
-    """Thread pool executor configuration"""
-    READ_WORKERS = 30    # Workers for NetBox read operations
-    WRITE_WORKERS = 20   # Workers for NetBox write operations
+    DB_SLOW_WARNING = 5000       # Warn if a database call > 5 seconds
+    DB_SEVERE_WARNING = 20000    # Error if a database call > 20 seconds
+    OPERATION_SLOW = 100         # Warn if operation > 100ms
 
 
 class RateLimits:
@@ -82,15 +51,9 @@ class RateLimits:
 # Export all constant classes
 __all__ = [
     "CacheTTL",
-    "NetBoxStatus",
-    "NetBoxRole",
-    "CustomFields",
-    "NetBoxScope",
-    "Tenant",
     "VLANConstraints",
     "SubnetConstraints",
     "FieldLengths",
     "PerformanceThresholds",
-    "ExecutorConfig",
     "RateLimits",
 ]

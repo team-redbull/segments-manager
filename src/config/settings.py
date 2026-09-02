@@ -1,176 +1,333 @@
 import os
+import json
 import logging
+import ipaddress
 import sys
 
-# NetBox Configuration
-# CRITICAL: These MUST be set as environment variables - never hardcode credentials!
-NETBOX_URL = os.getenv("NETBOX_URL")
-NETBOX_TOKEN = os.getenv("NETBOX_TOKEN")
-NETBOX_SSL_VERIFY = os.getenv("NETBOX_SSL_VERIFY", "true").lower() in ("true", "1", "yes")
+from dotenv import load_dotenv
 
-# Validate required environment variables at startup
-if not NETBOX_URL:
+# Load .env for local development. Existing environment variables always take
+# precedence (load_dotenv never overrides them), so container/Helm deployments
+# that inject real env vars are unaffected. This module is the first project
+# import on every entry path, so the file is loaded before any os.getenv call.
+load_dotenv()
+
+# MongoDB Configuration
+MONGODB_URL = os.getenv("MONGODB_URL")
+MONGODB_DB_NAME = os.getenv("MONGODB_DB_NAME", "segments_manager")
+
+# When true, skip TLS certificate verification for the MongoDB connection
+# (equivalent to "verify: false"). Keeps the connection encrypted but does not
+# validate the server certificate/CA — useful for Atlas or self-hosted Mongo
+# where the CA chain is unavailable. Do NOT enable in production if avoidable.
+MONGODB_TLS_INSECURE = os.getenv("MONGODB_TLS_INSECURE", "false").strip().lower() in (
+    "true", "1", "yes", "on",
+)
+
+if not MONGODB_URL:
     error_msg = (
-        "CRITICAL CONFIGURATION ERROR: NETBOX_URL environment variable is not set!\n"
-        "Please set NETBOX_URL in your environment or .env file.\n"
-        "Example: export NETBOX_URL='https://your-netbox-instance.com'"
+        "CRITICAL CONFIGURATION ERROR: MONGODB_URL environment variable is not set!\n"
+        "Please set MONGODB_URL in your environment or .env file.\n"
+        "Example: export MONGODB_URL='mongodb://localhost:27017'"
     )
     print(f"ERROR: {error_msg}", file=sys.stderr)
     raise ValueError(error_msg)
 
-if not NETBOX_TOKEN:
-    error_msg = (
-        "CRITICAL CONFIGURATION ERROR: NETBOX_TOKEN environment variable is not set!\n"
-        "Please set NETBOX_TOKEN in your environment or .env file.\n"
-        "Generate a token in NetBox: User Menu → API Tokens\n"
-        "Example: export NETBOX_TOKEN='your-api-token-here'\n"
-        "\n"
-        "⚠️  SECURITY WARNING: Never hardcode credentials in source code!"
-    )
-    print(f"ERROR: {error_msg}", file=sys.stderr)
-    raise ValueError(error_msg)
+# NOTE: this service no longer knows about the workflows API. Segment creation
+# used to fire a best-effort trigger at it (WORKFLOWS_API_URL), which put the
+# creation itself outside Temporal — invisible in the Temporal UI, and silently
+# skipped whenever that call failed. The direction is now reversed: the
+# segment-connectivity workflow is triggered directly by its caller and calls
+# POST /api/segments here as its own first step, so one Temporal run covers the
+# whole lifecycle. This service is a plain dependency of that workflow and
+# triggers nothing.
 
-# Sites Configuration
-SITES = os.getenv("SITES", "site1,site2,site3").split(",")
-SITES = [s.strip() for s in SITES if s.strip()]
+# Site Network Configuration — the single source of truth for configured sites.
+# SITES is derived from its keys rather than being its own env var, so the two
+# can never drift out of sync.
+#
+# JSON object keyed by site name:
+#   {"site1": {"pool": "192.10.0.0/16", "bmc": "10.50.0.0/16"}, ...}
+#
+#   pool  the /16 (or narrower) every segment at that site must fall INSIDE.
+#         Read on every create — see NetworkValidators.validate_segment_format.
+#   bmc   the site's static out-of-band management network. This service never
+#         reads it per-request; it exists here only so startup can check that no
+#         pool collides with a management network. The segment-connectivity
+#         workflow is the component that actually uses it (firewall rules).
+#
+# The same structure is defined ONCE in redbull-platform
+# (gitops/values/<env>.yaml, key `siteNetworks`) and rendered into both this
+# service's ConfigMap and segment-connectivity's. Sub-keys this service does not
+# recognise are ignored on purpose — another consumer may own them.
+SITE_NETWORKS_ENV = os.getenv("SITE_NETWORKS", "")
 
-# Network + Site IP Prefix Configuration
-# New format: "Network1:Site1:192,Network1:Site2:193,Network2:Site1:912,Network2:Site2:913"
-# This allows different networks to use different IP prefixes for the same site
-NETWORK_SITE_PREFIXES_ENV = os.getenv("NETWORK_SITE_PREFIXES", "")
+# Superseded by SITE_NETWORKS. Read only to detect a stale ConfigMap; never used.
+_LEGACY_SITE_PREFIXES_ENV = os.getenv("SITE_PREFIXES", "")
 
-# Legacy format for backward compatibility (deprecated)
-# Format: "site1:192,site2:193,site3:194"
-SITE_PREFIXES_ENV = os.getenv("SITE_PREFIXES", "")
+_SITE_NETWORKS_EXAMPLE = (
+    'SITE_NETWORKS=\'{"site1": {"pool": "192.10.0.0/16", "bmc": "10.50.0.0/16"}, '
+    '"site2": {"pool": "193.51.0.0/16", "bmc": "10.51.0.0/16"}}\''
+)
 
-def parse_network_site_prefixes(network_site_prefixes_str: str) -> dict:
-    """Parse network+site prefixes from environment variable
 
-    Format: "Network1:Site1:192,Network1:Site2:193,Network2:Site1:912"
-    Returns: {("Network1", "Site1"): "192", ("Network1", "Site2"): "193", ...}
+def parse_site_networks(raw: str):
+    """Parse and validate the SITE_NETWORKS JSON topology.
+
+    Returns (networks, pools, errors). Never raises — every problem is appended
+    to `errors` so startup can report all of them at once. The raise happens in
+    validate_site_networks(), not at import: src/app.py already has a
+    validate-then-log lifespan, and raising here would make this module
+    un-importable (breaking tests and any tooling that reads settings).
+
+    networks  {site: {sub-key: raw value}} — the untouched parsed JSON per site
+    pools     {site: IPv4Network} — parsed once here so request validation does
+              no re-parsing
     """
-    prefixes = {}
-    if not network_site_prefixes_str:
-        return prefixes
+    networks: dict = {}
+    pools: dict = {}
+    errors: list = []
 
-    for triple in network_site_prefixes_str.split(","):
-        parts = triple.strip().split(":")
-        if len(parts) == 3:
-            network, site, prefix = parts
-            prefixes[(network.strip(), site.strip())] = prefix.strip()
-        elif len(parts) == 2:
-            # Legacy format: site:prefix (assume default network context)
-            site, prefix = parts
-            prefixes[("default", site.strip())] = prefix.strip()
-    return prefixes
+    if not raw.strip():
+        errors.append("SITE_NETWORKS is not set")
+        return networks, pools, errors
 
-def parse_site_prefixes(site_prefixes_str: str) -> dict:
-    """Parse site prefixes from environment variable (LEGACY - for backward compatibility)
+    try:
+        parsed = json.loads(raw)
+    except ValueError as e:
+        errors.append(f"SITE_NETWORKS is not valid JSON: {e}")
+        # The old format is a comma/colon string, not JSON. Say so explicitly —
+        # otherwise a half-migrated ConfigMap just looks like a typo.
+        if ":" in raw and "{" not in raw:
+            errors.append(
+                "the value looks like the legacy SITE_PREFIXES format "
+                '("site1:192,site2:193"). It was replaced by the JSON topology below.'
+            )
+        return networks, pools, errors
 
-    Format: "site1:192,site2:193,site3:194"
-    Returns: {"site1": "192", "site2": "193", ...}
+    if not isinstance(parsed, dict) or not parsed:
+        errors.append("SITE_NETWORKS must be a non-empty JSON object keyed by site name")
+        return networks, pools, errors
+
+    seen_lower: dict = {}
+    for site, value in parsed.items():
+        if not site or not site.strip():
+            errors.append("SITE_NETWORKS contains an empty site name")
+            continue
+
+        # Site lookup is case-insensitive (see resolve_site), so two names that
+        # differ only in case would make it ambiguous which one wins.
+        lower = site.lower()
+        if lower in seen_lower:
+            errors.append(
+                f"sites '{seen_lower[lower]}' and '{site}' differ only by case; "
+                f"site lookup is case-insensitive"
+            )
+            continue
+        seen_lower[lower] = site
+
+        if not isinstance(value, dict):
+            errors.append(
+                f"site '{site}' maps to a {type(value).__name__}, expected an object "
+                f'with a "pool" key'
+            )
+            continue
+        if "pool" not in value:
+            errors.append(f'site \'{site}\' has no "pool" key')
+            continue
+
+        pool = _parse_cidr(site, "pool", value["pool"], errors)
+        if pool is not None:
+            pools[site] = pool
+        # bmc is optional; parsed only to validate it and to check disjointness.
+        if "bmc" in value:
+            _parse_cidr(site, "bmc", value["bmc"], errors)
+
+        networks[site] = value
+
+    errors.extend(_find_overlaps(parsed, pools))
+    return networks, pools, errors
+
+
+def _parse_cidr(site: str, key: str, value, errors: list):
+    """Parse one CIDR sub-key, appending a specific message on failure."""
+    try:
+        # strict=True: "192.10.0.1/16" is an operator error, not something to
+        # silently normalise away — the config should say what it means.
+        network = ipaddress.ip_network(value, strict=True)
+    except (ValueError, TypeError) as e:
+        errors.append(f"site '{site}': invalid {key} CIDR {value!r}: {e}")
+        return None
+    if network.version != 4:
+        # The rest of the validation stack is IPv4-only (see the octet handling
+        # in NetworkValidators.validate_no_reserved_ips).
+        errors.append(f"site '{site}': {key} must be IPv4, got {value!r}")
+        return None
+    return network
+
+
+def _find_overlaps(parsed: dict, pools: dict) -> list:
+    """Check that no pool overlaps another pool or any site's BMC network.
+
+    Two overlapping pools would make site containment ambiguous. A pool
+    overlapping a BMC network means segments would be allocated on top of an
+    out-of-band management network. Neither is detectable anywhere else: request
+    validation checks containment first, and pools are disjoint from the BMC
+    ranges by design, so no segment that passes containment can ever reach a BMC
+    conflict. Startup is the only place these can be caught.
     """
-    prefixes = {}
-    if not site_prefixes_str:
-        return prefixes
+    errors = []
+    sites = list(pools)
 
-    for pair in site_prefixes_str.split(","):
-        if ":" in pair:
-            site, prefix = pair.strip().split(":", 1)
-            prefixes[site.strip()] = prefix.strip()
-    return prefixes
+    for i, site_a in enumerate(sites):
+        for site_b in sites[i + 1:]:
+            if pools[site_a].overlaps(pools[site_b]):
+                errors.append(
+                    f"site '{site_a}' pool {pools[site_a]} overlaps "
+                    f"site '{site_b}' pool {pools[site_b]}"
+                )
 
-# Parse new format first, fallback to legacy format
-NETWORK_SITE_IP_PREFIXES = parse_network_site_prefixes(NETWORK_SITE_PREFIXES_ENV)
-SITE_IP_PREFIXES_LEGACY = parse_site_prefixes(SITE_PREFIXES_ENV)
+    for bmc_site, value in parsed.items():
+        if not isinstance(value, dict) or "bmc" not in value:
+            continue
+        try:
+            bmc = ipaddress.ip_network(value["bmc"], strict=True)
+        except (ValueError, TypeError):
+            continue  # already reported by _parse_cidr
+        for pool_site, pool in pools.items():
+            if pool.overlaps(bmc):
+                errors.append(
+                    f"site '{pool_site}' pool {pool} overlaps site "
+                    f"'{bmc_site}' BMC network {bmc}"
+                )
+    return errors
 
-# If using legacy format, convert to new format with default network
-if not NETWORK_SITE_IP_PREFIXES and SITE_IP_PREFIXES_LEGACY:
-    NETWORK_SITE_IP_PREFIXES = {("default", site): prefix for site, prefix in SITE_IP_PREFIXES_LEGACY.items()}
 
-def validate_site_prefixes():
-    """Validate that all configured sites have IP prefixes defined
+SITE_NETWORKS, SITE_POOLS, _SITE_NETWORKS_ERRORS = parse_site_networks(SITE_NETWORKS_ENV)
+SITES = list(SITE_NETWORKS.keys())
 
-    For new multi-network format, this checks that configuration is not empty.
-    Individual network+site combinations are validated at segment creation time.
-    """
-    if not NETWORK_SITE_IP_PREFIXES:
+
+def validate_site_networks():
+    """Validate the site topology. Fail fast at startup."""
+    # New code against a stale ConfigMap. Fail rather than start with no sites —
+    # the alternative is a Healthy pod that rejects every create.
+    if _LEGACY_SITE_PREFIXES_ENV and not SITE_NETWORKS_ENV.strip():
         error_msg = (
-            f"CRITICAL CONFIGURATION ERROR: No network+site IP prefixes configured!\n"
-            f"Configured sites: {SITES}\n"
-            f"Please set NETWORK_SITE_PREFIXES environment variable.\n"
-            f"New format: NETWORK_SITE_PREFIXES=\"Network1:Site1:192,Network1:Site2:193,Network2:Site1:912\"\n"
-            f"Legacy format: SITE_PREFIXES=\"Site1:192,Site2:193,Site3:194\" (uses 'default' network)"
+            "CRITICAL CONFIGURATION ERROR: SITE_PREFIXES is set but SITE_NETWORKS is not.\n"
+            "SITE_PREFIXES was replaced by SITE_NETWORKS (a JSON site topology) and is\n"
+            "no longer read. This process is running new code against a stale config.\n"
+            f"{_SITE_NETWORKS_EXAMPLE}\n"
+            "In the cluster the value is defined once in redbull-platform\n"
+            "(gitops/values/<env>.yaml, key `siteNetworks`) and rendered into this\n"
+            "service's ConfigMap by helm-charts-segments-manager."
         )
-
-        # Log error and crash the application
         print(f"ERROR: {error_msg}", file=sys.stderr)
         raise ValueError(error_msg)
 
-    # Log what networks and sites are configured
-    configured_combinations = list(NETWORK_SITE_IP_PREFIXES.keys())
-    networks = set(network for network, site in configured_combinations)
-    sites_with_prefixes = set(site for network, site in configured_combinations)
+    if _SITE_NETWORKS_ERRORS:
+        error_msg = (
+            "CRITICAL CONFIGURATION ERROR: SITE_NETWORKS is invalid!\n"
+            + "\n".join(f"  - {e}" for e in _SITE_NETWORKS_ERRORS)
+            + f"\n{_SITE_NETWORKS_EXAMPLE}"
+        )
+        print(f"ERROR: {error_msg}", file=sys.stderr)
+        raise ValueError(error_msg)
 
-    print(f"INFO: Configured networks: {sorted(networks)}", file=sys.stderr)
-    print(f"INFO: Sites with network prefixes: {sorted(sites_with_prefixes)}", file=sys.stderr)
-    print(f"INFO: Total network+site combinations: {len(configured_combinations)}", file=sys.stderr)
+    # Both set is the expand/contract rollout window: the ConfigMap carries the
+    # old key and the new one while images roll. Warn, don't fail.
+    if _LEGACY_SITE_PREFIXES_ENV:
+        print(
+            "WARNING: SITE_PREFIXES is set and IGNORED (superseded by SITE_NETWORKS). "
+            "Remove it from the ConfigMap once every replica is on the new image.",
+            file=sys.stderr,
+        )
 
-def get_site_prefix(site: str, vrf: str = None) -> str:
-    """Get the IP prefix for a given site and network/VRF
+    summary = ", ".join(f"{site}={pool}" for site, pool in SITE_POOLS.items())
+    print(f"INFO: Site networks validated: {summary}", file=sys.stderr)
 
-    Args:
-        site: Site name (e.g., "Site1")
-        vrf: VRF/Network name (e.g., "Network1"). If None, tries "default" network
+    # A typo'd sub-key (e.g. "bcm") is silently ignored here but crash-loops the
+    # segment-connectivity worker, which requires it. Surface it in this log too.
+    for site, value in SITE_NETWORKS.items():
+        unknown = sorted(set(value) - {"pool", "bmc"})
+        if unknown:
+            print(
+                f"INFO: site '{site}' has unrecognised SITE_NETWORKS sub-keys "
+                f"{unknown} (ignored by this service)",
+                file=sys.stderr,
+            )
 
-    Returns:
-        IP prefix (e.g., "192") or None if not found
+
+def resolve_site(site: str):
+    """Return the canonical configured name for `site`, or None if unknown.
+
+    Lookup is case-insensitive. This is the one place that rule lives — both
+    InputValidators.validate_site and the pool lookup go through it, so a
+    request for "Site1" cannot pass one and fail the other.
     """
-    # Try with specified VRF first
-    if vrf:
-        prefix = NETWORK_SITE_IP_PREFIXES.get((vrf, site))
-        if prefix:
-            return prefix
-
-    # Fall back to "default" network (for legacy compatibility)
-    prefix = NETWORK_SITE_IP_PREFIXES.get(("default", site))
-    if prefix:
-        return prefix
-
-    # Return None if not found (validation will catch this)
+    if site in SITE_NETWORKS:
+        return site
+    site_lower = site.lower()
+    for key in SITE_NETWORKS:
+        if key.lower() == site_lower:
+            return key
     return None
 
-def get_all_networks() -> list:
-    """Get list of all configured networks/VRFs"""
-    networks = set(network for network, site in NETWORK_SITE_IP_PREFIXES.keys())
-    return sorted(networks)
+
+def get_site_pool(site: str):
+    """Return the site's allocatable pool as an IPv4Network, or None if unknown."""
+    canonical = resolve_site(site)
+    return SITE_POOLS.get(canonical) if canonical else None
+
+
+def get_site_networks(site: str):
+    """Return the site's raw topology dict (pool, bmc, ...), or None if unknown."""
+    canonical = resolve_site(site)
+    return SITE_NETWORKS.get(canonical) if canonical else None
+
 
 # Logging Configuration
+# Path to the rotating log file. Defaults to the current directory for local
+# runs; in the container it is set to a writable location (see Dockerfile /
+# Helm), because the app runs as a non-root user that cannot write to /app.
+LOG_FILE = os.getenv("LOG_FILE", "segments_manager.log")
+
+
 def setup_logging():
-    """Configure logging for the application with rotation"""
+    """Configure logging with a stdout handler and a rotating file handler.
+
+    File logging is best-effort: if the log file cannot be opened (e.g. the
+    non-root container user lacks write permission on the target directory),
+    the app logs a warning and continues with stdout only instead of crashing.
+    """
     from logging.handlers import RotatingFileHandler
 
-    # Get log level from environment variable, default to INFO
     log_level_str = os.getenv("LOG_LEVEL", "INFO").upper()
     log_level = getattr(logging, log_level_str, logging.INFO)
+    log_format = '%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] %(funcName)s() - %(message)s'
 
-    # Create rotating file handler: 50MB per file, keep 5 backup files
-    rotating_handler = RotatingFileHandler(
-        'vlan_manager.log',
-        maxBytes=50 * 1024 * 1024,  # 50MB
-        backupCount=5,  # Keep 5 backup files (total ~250MB)
-        encoding='utf-8'
-    )
+    handlers = [logging.StreamHandler(sys.stdout)]
+    file_handler_error = None
+    try:
+        handlers.append(RotatingFileHandler(
+            LOG_FILE,
+            maxBytes=50 * 1024 * 1024,
+            backupCount=5,
+            encoding='utf-8'
+        ))
+    except OSError as e:  # includes PermissionError
+        file_handler_error = e
 
-    logging.basicConfig(
-        level=log_level,
-        format='%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] %(funcName)s() - %(message)s',
-        handlers=[
-            logging.StreamHandler(sys.stdout),
-            rotating_handler
-        ]
-    )
-    return logging.getLogger(__name__)
+    logging.basicConfig(level=log_level, format=log_format, handlers=handlers)
+    logger = logging.getLogger(__name__)
+
+    if file_handler_error is not None:
+        logger.warning(
+            f"File logging disabled: could not open log file '{LOG_FILE}' "
+            f"({file_handler_error}). Logging to stdout only. "
+            f"Set LOG_FILE to a writable path to enable file logging and the /api/logs endpoint."
+        )
+    return logger
+
 
 # Server Configuration
 SERVER_HOST = os.getenv("SERVER_HOST", "0.0.0.0")

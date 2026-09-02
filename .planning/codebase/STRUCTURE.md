@@ -106,7 +106,7 @@ segments_2/                        # Project root
 │   └── sessions.json           # Persistent session storage
 │
 ├── logs/                        # Application logs (git-ignored)
-│   └── vlan_manager.log        # Rotating log file
+│   └── segments_manager.log        # Rotating log file
 │
 ├── deploy/                      # Deployment configurations
 │   ├── helm/                   # Kubernetes Helm chart
@@ -201,7 +201,7 @@ segments_2/                        # Project root
 **`logs/`:**
 - Purpose: Application logs
 - Contains: Rotating log file
-- Key files: `vlan_manager.log`
+- Key files: `segments_manager.log`
 
 ## Key File Locations
 
@@ -352,13 +352,13 @@ segments_2/                        # Project root
 - Purpose: Application logs (not git-tracked)
 - Generated: Yes (created on first run)
 - Committed: No (in .gitignore)
-- Contents: `vlan_manager.log` (rotating daily)
+- Contents: `segments_manager.log` (rotating daily)
 
 **`deploy/helm/`:**
 - Purpose: Kubernetes Helm chart for production deployment
 - Generated: No (committed to repo)
 - Contents: K8s manifests, values.yaml, Chart.yaml
-- Usage: `helm install vlan-manager ./deploy/helm/`
+- Usage: `helm install segments-manager ./deploy/helm/`
 
 **`static/`:**
 - Purpose: Web UI assets (committed to repo)

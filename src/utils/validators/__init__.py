@@ -1,12 +1,12 @@
-"""Validators module for VLAN Manager.
+"""Validators module for Segments Manager.
 
 This module provides a unified Validators class that aggregates all validation methods
 from specialized validator modules. This maintains backward compatibility with existing code.
 
 Module structure:
-- input_validators.py: Site, VLAN ID, EPG name, cluster name, description
+- input_validators.py: Site, VLAN ID, EPG name, cluster name
 - network_validators.py: IP format, subnet masks, reserved IPs, overlap detection
-- organization_validators.py: VRF, allocation state, uniqueness
+- organization_validators.py: Allocation state, uniqueness
 """
 
 from .input_validators import InputValidators
@@ -19,11 +19,9 @@ class Validators:
 
     # Input validation methods
     validate_site = staticmethod(InputValidators.validate_site)
-    validate_object_id = staticmethod(InputValidators.validate_object_id)
     validate_epg_name = staticmethod(InputValidators.validate_epg_name)
     validate_vlan_id = staticmethod(InputValidators.validate_vlan_id)
     validate_cluster_name = staticmethod(InputValidators.validate_cluster_name)
-    validate_description = staticmethod(InputValidators.validate_description)
 
     # Network validation methods
     validate_segment_format = staticmethod(NetworkValidators.validate_segment_format)
@@ -35,8 +33,6 @@ class Validators:
     # Organization/business validation methods
     validate_segment_not_allocated = staticmethod(OrganizationValidators.validate_segment_not_allocated)
     validate_vlan_name_uniqueness = staticmethod(OrganizationValidators.validate_vlan_name_uniqueness)
-    validate_vrf = staticmethod(OrganizationValidators.validate_vrf)
-
 
 
 # Export all classes for direct import if needed

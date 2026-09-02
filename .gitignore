@@ -217,7 +217,7 @@ Temporary Items
 
 # Application specific
 *.log
-vlan_manager.log
+segments_manager.log
 logs/
 
 # Container images and deployment artifacts
@@ -251,11 +251,7 @@ Icon?
 Thumbs.db
 *.orig
 
-# Test files
-test_*.py
-*_test.py
-tests/
-pytest.ini
+# Test artifacts (the tests/ suite itself IS tracked)
 tox.ini
 
 # Coverage reports

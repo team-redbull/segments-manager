@@ -4,6 +4,8 @@ from typing import Dict, Any
 from fastapi import HTTPException
 from fastapi.responses import PlainTextResponse
 
+from ..config.settings import LOG_FILE
+
 logger = logging.getLogger(__name__)
 
 class LogsService:
@@ -56,8 +58,8 @@ class LogsService:
 
     @staticmethod
     async def get_logs(lines: int = 100) -> PlainTextResponse:
-        """Get the contents of the vlan_manager.log file (efficiently reads last N lines)"""
-        log_file_path = "vlan_manager.log"
+        """Get the contents of the log file (efficiently reads last N lines)"""
+        log_file_path = LOG_FILE
 
         try:
             if not os.path.exists(log_file_path):
@@ -90,7 +92,7 @@ class LogsService:
     @staticmethod
     async def get_log_info() -> Dict[str, Any]:
         """Get information about the log file"""
-        log_file_path = "vlan_manager.log"
+        log_file_path = LOG_FILE
         
         try:
             if not os.path.exists(log_file_path):

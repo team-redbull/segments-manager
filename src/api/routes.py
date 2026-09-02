@@ -1,137 +1,155 @@
 from typing import Optional, List
 import logging
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Depends, Response, Request
-from starlette.responses import JSONResponse
+from fastapi import APIRouter, HTTPException
 
 from ..models.schemas import (
-    VLANAllocationRequest, VLANAllocationResponse, 
-    VLANRelease, Segment, LoginRequest, LoginResponse, AuthStatusResponse
+    SegmentAllocationRequest, SegmentAllocationResponse,
+    SegmentRelease, SegmentUnlock, Segment,
+    SegmentDhcpUpdate, SegmentTypeUpdate, SegmentClustersUpdate,
+    SegmentConnectivityRequestsUpdate, SegmentConnectivityFailure
 )
 from ..services.allocation_service import AllocationService
 from ..services.segment_service import SegmentService
 from ..services.stats_service import StatsService
 from ..services.logs_service import LogsService
 from ..services.export_service import ExportService
-from ..auth.auth import require_auth, get_current_user, login, logout, get_session_token, SESSION_TTL_DAYS
 
 router = APIRouter()
 
-# Authentication Routes
-@router.post("/auth/login", response_model=LoginResponse)
-async def auth_login(request: LoginRequest, response: Response):
-    """Login with username and password
-
-    Returns a session token that can be used as Bearer token for API requests.
-    For web UI, a cookie is also set automatically.
-    """
-    session_token = login(request.username, request.password)
-    if session_token:
-        # Set session cookie (for web UI) - matches session TTL
-        response.set_cookie(
-            key="session_token",
-            value=session_token,
-            httponly=True,
-            secure=False,  # Set to True in production with HTTPS
-            samesite="lax",
-            max_age=SESSION_TTL_DAYS * 86400  # Convert days to seconds (7 days = 604800 seconds)
-        )
-        # Return token in response body (for API/curl clients)
-        return LoginResponse(
-            success=True, 
-            message="Login successful",
-            token=session_token
-        )
-    else:
-        raise HTTPException(status_code=401, detail="Invalid username or password")
-
-@router.post("/auth/logout")
-async def auth_logout(request: Request, response: Response):
-    """Logout current user"""
-    logout(request)
-    response.delete_cookie(key="session_token")
-    return {"success": True, "message": "Logged out successfully"}
-
-@router.get("/auth/status", response_model=AuthStatusResponse)
-async def auth_status(current_user: bool = Depends(get_current_user)):
-    """Check authentication status"""
-    return AuthStatusResponse(authenticated=current_user)
-
-# VLAN Management Routes
-@router.post("/allocate-vlan", response_model=VLANAllocationResponse)
-async def allocate_vlan(
-    request: VLANAllocationRequest,
-    _: bool = Depends(require_auth)
-):
-    """Allocate a VLAN segment for a cluster"""
-    return await AllocationService.allocate_vlan(request)
-
-@router.post("/release-vlan")
-async def release_vlan(
-    request: VLANRelease,
-    _: bool = Depends(require_auth)
-):
-    """Release a VLAN segment allocation"""
-    return await AllocationService.release_vlan(request.cluster_name, request.site, request.vrf)
-
 # Segment Management Routes
 @router.get("/segments")
-async def get_segments(site: Optional[str] = None, allocated: Optional[bool] = None):
-    """Get segments with optional filters"""
-    return await SegmentService.get_segments(site, allocated)
+async def get_segments(
+    site: Optional[str] = None,
+    status: Optional[str] = None,
+    type: Optional[str] = None,
+):
+    """Get segments with optional filters (status: Locked | Available | Allocated)"""
+    return await SegmentService.get_segments(site, status, type)
 
 @router.get("/segments/search")
 async def search_segments(
-    q: str, 
-    site: Optional[str] = None, 
-    allocated: Optional[bool] = None
+    q: str,
+    site: Optional[str] = None,
+    status: Optional[str] = None
 ):
-    """Search segments by cluster name, EPG name, VLAN ID, description, or segment"""
-    return await SegmentService.search_segments(q, site, allocated)
+    """Search segments by cluster name, EPG name, VLAN ID, or segment"""
+    return await SegmentService.search_segments(q, site, status)
 
 @router.post("/segments")
 async def create_segment(
-    segment: Segment,
-    _: bool = Depends(require_auth)
+    segment: Segment
 ):
     """Create a new segment"""
     return await SegmentService.create_segment(segment)
 
-@router.get("/segments/{segment_id}")
-async def get_segment(segment_id: str):
-    """Get a single segment by ID"""
-    return await SegmentService.get_segment_by_id(segment_id)
+# Single-segment routes are keyed by the segment CIDR — the natural key
+# (unique + immutable) — never by the internal Mongo ObjectId. The CIDR
+# contains a "/" so it can't live in a path: reads/deletes take it as a
+# query parameter, mutations carry it in the request body.
 
-@router.put("/segments/{segment_id}")
-async def update_segment(
-    segment_id: str,
-    segment: Segment,
-    _: bool = Depends(require_auth)
+@router.get("/segments/by-segment")
+async def get_segment(segment: str):
+    """Get a single segment by its CIDR value (e.g. ?segment=192.168.1.0/24)"""
+    return await SegmentService.get_segment_by_segment(segment)
+
+@router.patch("/segments")
+async def update_segment_dhcp(
+    request: SegmentDhcpUpdate
 ):
-    """Update a segment"""
-    return await SegmentService.update_segment(segment_id, segment)
+    """Update a segment's DHCP flag — the only in-place-editable segment field.
 
-@router.put("/segments/{segment_id}/clusters")
+    Identity fields (site, vlan_id, epg_name, segment) are immutable after
+    creation; `type` changes only through the conversion endpoint
+    (PUT /segments/type); lifecycle fields are managed by their own endpoints.
+    """
+    return await SegmentService.update_segment_dhcp(request.segment, request.dhcp)
+
+@router.put("/segments/type")
+async def update_segment_type(
+    request: SegmentTypeUpdate
+):
+    """Convert a segment to another type (status returns to "Locked").
+
+    Called by the segment-lifecycle orchestrator's convert-segment workflow.
+    Conversion resets the segment to the state a freshly created one starts
+    in: status "Locked" (its firewall rules must be re-opened for the new
+    type before it may be allocated) with all segment-connectivity fields —
+    the old type's pending request ids and any stale failure note — cleared.
+
+    An "Allocated" segment is never converted (409). `expected_type`, when
+    given, is a compare-and-set guard against concurrent conversions: 409 if
+    the stored type matches neither it nor the new type. Idempotent.
+    """
+    return await SegmentService.update_segment_type(
+        request.segment, request.type, request.expected_type
+    )
+
+@router.put("/segments/clusters")
 async def update_segment_clusters(
-    segment_id: str,
-    request: dict,
-    _: bool = Depends(require_auth)
+    request: SegmentClustersUpdate
 ):
-    """Update cluster assignment for a segment (for shared segments)"""
-    cluster_names = request.get("cluster_names", "")
-    return await SegmentService.update_segment_clusters(segment_id, cluster_names)
+    """Assign a segment to a single cluster.
 
-@router.delete("/segments/{segment_id}")
-async def delete_segment(
-    segment_id: str,
-    _: bool = Depends(require_auth)
+    Empty or omitted cluster_name releases the segment.
+    """
+    return await SegmentService.update_segment_clusters(request.segment, request.cluster_name)
+
+@router.put("/segments/segment-connectivity-requests")
+async def set_segment_connectivity_requests(
+    request: SegmentConnectivityRequestsUpdate
 ):
-    """Delete a segment"""
-    return await SegmentService.delete_segment(segment_id)
+    """Replace the pending segment-connectivity request ids displayed for a segment.
+
+    Set by the segment-connectivity orchestrator after it submits firewall (open-rules)
+    requests; the UI shows the ids beside the segment's status while they await
+    approval. An empty list clears the display (all requests completed).
+    Idempotent.
+    """
+    return await SegmentService.set_segment_connectivity_requests(
+        request.segment, request.request_ids, request.submitted_at
+    )
+
+@router.put("/segments/segment-connectivity-failure")
+async def set_segment_connectivity_failure(
+    request: SegmentConnectivityFailure
+):
+    """Record a terminal segment-connectivity-workflow failure for a segment.
+
+    Set by the segment-connectivity orchestrator when its firewall (open-rules)
+    workflow fails or is cancelled after submission; the UI shows a
+    "Workflow failed" note beside the segment's status, with the message
+    (including any orphaned request ids) behind the popover. The segment stays
+    Locked — segment-connectivity was never established. The note is cleared
+    automatically when a fresh set of request ids is published (a new run).
+    Idempotent.
+    """
+    return await SegmentService.set_segment_connectivity_failure(
+        request.segment, request.message
+    )
+
+
+@router.post("/segments/unlock")
+async def unlock_segment(
+    request: SegmentUnlock
+):
+    """Unlock a segment identified by its CIDR value (status Locked -> Available).
+
+    New segments start with status "Locked" (firewall rules not yet open) and
+    are excluded from automatic VLAN allocation until unlocked. Intended to be
+    called by the service responsible for opening firewall rules once it has
+    done so. This is a one-way lifecycle transition — there is no endpoint to
+    re-lock a segment. Idempotent.
+    """
+    return await SegmentService.unlock_segment_by_segment(request.segment)
+
+@router.delete("/segments")
+async def delete_segment(segment: str):
+    """Delete a segment identified by its CIDR value (e.g. ?segment=192.168.1.0/24)"""
+    return await SegmentService.delete_segment(segment)
 
 @router.post("/segments/bulk")
 async def create_segments_bulk(
-    segments: List[Segment],
-    _: bool = Depends(require_auth)
+    segments: List[Segment]
 ):
     """Create multiple segments at once"""
     logger = logging.getLogger(__name__)
@@ -143,35 +161,43 @@ async def create_segments_bulk(
     logger.info(f"Received bulk create request with {len(segments)} segments")
     return await SegmentService.create_segments_bulk(segments)
 
+# Segment Allocation Routes
+#
+# Allocation acts on the segment collection — it picks a member out of the
+# available pool rather than addressing a known CIDR — so both routes hang off
+# /segments like every other sub-route.
+
+@router.post("/segments/allocate", response_model=SegmentAllocationResponse)
+async def allocate_segment(
+    request: SegmentAllocationRequest
+):
+    """Allocate a VLAN segment of a given type for a cluster at a site.
+
+    Idempotent per (cluster_name, site, type): a cluster that already holds a
+    segment of that type at that site gets the same one back.
+    """
+    return await AllocationService.allocate_segment(request)
+
+@router.post("/segments/release")
+async def release_segment(
+    request: SegmentRelease
+):
+    """Release a segment identified by its CIDR value (status Allocated -> Available).
+
+    Keyed by the segment CIDR exactly like /segments/unlock — the CIDR is
+    globally unique, so no site, cluster name or type is needed.
+
+    Idempotent for an already-"Available" segment (200). Releasing a "Locked"
+    segment is a 409 — nothing was ever allocated, and release is not a path
+    to "Available" (that is /segments/unlock's job).
+    """
+    return await AllocationService.release_segment(request.segment)
+
 # Statistics and Configuration Routes
 @router.get("/sites")
 async def get_sites():
     """Get configured sites"""
     return await StatsService.get_sites()
-
-@router.get("/vrfs")
-async def get_vrfs():
-    """Get list of available VRFs from NetBox"""
-    return await SegmentService.get_vrfs()
-
-@router.get("/network-site-mapping")
-async def get_network_site_mapping():
-    """Get mapping of networks to available sites"""
-    from ..config.settings import NETWORK_SITE_IP_PREFIXES
-
-    # Build mapping: {network: [sites]}
-    mapping = {}
-    for (network, site) in NETWORK_SITE_IP_PREFIXES.keys():
-        if network not in mapping:
-            mapping[network] = []
-        if site not in mapping[network]:
-            mapping[network].append(site)
-
-    # Sort sites for each network
-    for network in mapping:
-        mapping[network] = sorted(mapping[network])
-
-    return {"mapping": mapping}
 
 @router.get("/stats")
 async def get_stats():
@@ -186,19 +212,19 @@ async def health_check():
 # Export Routes
 @router.get("/export/segments/csv")
 async def export_segments_csv(
-    site: Optional[str] = None, 
-    allocated: Optional[bool] = None
+    site: Optional[str] = None,
+    status: Optional[str] = None
 ):
     """Export segments data as CSV"""
-    return await ExportService.export_segments_csv(site=site, allocated=allocated)
+    return await ExportService.export_segments_csv(site=site, status=status)
 
 @router.get("/export/segments/excel")
 async def export_segments_excel(
-    site: Optional[str] = None, 
-    allocated: Optional[bool] = None
+    site: Optional[str] = None,
+    status: Optional[str] = None
 ):
     """Export segments data as Excel"""
-    return await ExportService.export_segments_excel(site=site, allocated=allocated)
+    return await ExportService.export_segments_excel(site=site, status=status)
 
 @router.get("/export/stats/csv")
 async def export_stats_csv():
@@ -208,7 +234,7 @@ async def export_stats_csv():
 # Logs Management Routes
 @router.get("/logs")
 async def get_logs(lines: int = 100):
-    """Get the contents of the vlan_manager.log file
+    """Get the contents of the segments_manager.log file
     
     Args:
         lines: Number of lines to retrieve from the end of the log file (default: 100)

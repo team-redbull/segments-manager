@@ -29,7 +29,7 @@ App → pynetbox (Python library) → NetBox REST API → PostgreSQL
   - Data: VLANs, IP Prefixes (segments), Sites, VRFs, Tenants, custom fields
 
 **Data Mapping:**
-| VLAN Manager Concept | NetBox Object | Storage |
+| Segments Manager Concept | NetBox Object | Storage |
 |---------------------|---------------|---------|
 | Segment | IP Prefix | dcim.prefixes |
 | VLAN ID | VLAN | ipam.vlans |
@@ -86,11 +86,11 @@ App → pynetbox (Python library) → NetBox REST API → PostgreSQL
 
 **Error Tracking:**
 - None configured (no Sentry, DataDog, etc.)
-- Errors logged to `vlan_manager.log` and stdout
+- Errors logged to `segments_manager.log` and stdout
 
 **Logs:**
 - File-based rotating logs
-  - File: `vlan_manager.log`
+  - File: `segments_manager.log`
   - Handler: RotatingFileHandler (50MB per file, 5 backups)
   - Location: `src/config/settings.py`
 - Console/stdout output for container logs

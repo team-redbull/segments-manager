@@ -523,7 +523,7 @@ Ensure all calls to cache functions use `await`
 version: '3.8'
 
 services:
-  vlan-manager:
+  segments-manager:
     build: .
     ports:
       - "9000:9000"
@@ -554,7 +554,7 @@ volumes:
 docker-compose up
 
 # Scale to multiple instances (shares cache!)
-docker-compose up --scale vlan-manager=3
+docker-compose up --scale segments-manager=3
 ```
 
 ---

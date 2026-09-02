@@ -1,60 +1,69 @@
-from typing import Optional
+from typing import List, Optional, Literal
 from datetime import datetime
 from pydantic import BaseModel, Field
 
+SegmentType = Literal["MCE", "INVENTORY", "HC", "PXE"]
+
+
 class Segment(BaseModel):
+    type: SegmentType = Field(default="HC", description="Segment type", examples=["MCE"])
     site: str = Field(..., description="Site name (must be one of the configured sites)", examples=["site1"])
     vlan_id: int = Field(ge=1, le=4094, description="VLAN ID (1-4094)", examples=[100])
-    epg_name: str = Field(..., description="Endpoint Group name (alphanumeric, underscore, hyphen only)", examples=["EPG_PROD_01"])
-    segment: str = Field(..., description="Network segment in CIDR notation (must match site IP prefix)", examples=["192.168.1.0/24"])
-    vrf: str = Field(..., description="VRF/Network name", examples=["Network1"])
-    dhcp: bool = Field(default=False, description="Enable DHCP for this segment")
-    description: Optional[str] = Field(default="", description="Optional description for this segment", examples=["Production web servers"])
+    epg_name: str = Field(..., description="Endpoint Group name", examples=["EPG_PROD_01"])
+    segment: str = Field(..., description="Network segment in CIDR notation (must fall inside the site's configured pool)", examples=["192.10.1.0/24"])
+    dhcp: bool = Field(default=True, description="Enable DHCP for this segment")
     cluster_name: Optional[str] = Field(default=None, description="Cluster name if allocated, None if available", examples=["cluster-prod-01"])
     allocated_at: Optional[datetime] = Field(default=None, description="Timestamp when segment was allocated")
-    released: bool = Field(default=False, description="Whether segment was previously released")
-    released_at: Optional[datetime] = Field(default=None, description="Timestamp when segment was released")
 
     model_config = {
+        "extra": "forbid",
         "json_schema_extra": {
             "examples": [
                 {
+                    "type": "MCE",
                     "site": "site1",
                     "vlan_id": 100,
                     "epg_name": "EPG_PROD_01",
                     "segment": "192.168.1.0/24",
-                    "vrf": "Network1",
-                    "dhcp": False,
-                    "description": "Production web servers"
+                    "dhcp": True
                 }
             ]
         }
     }
 
-class VLANAllocationRequest(BaseModel):
+
+class SegmentAllocationRequest(BaseModel):
+    """Request for POST /api/segments/allocate.
+
+    `type` is required — an allocator must never have to guess which kind of
+    segment the caller wants. It also scopes the idempotency check, so one
+    cluster can hold e.g. an MCE and an HC segment at the same site.
+    """
     cluster_name: str = Field(..., description="Name of the cluster requesting allocation", examples=["cluster-prod-01"])
-    site: str = Field(..., description="Site where VLAN should be allocated", examples=["site1"])
-    vrf: str = Field(..., description="VRF/Network to allocate from", examples=["Network1"])
+    site: str = Field(..., description="Site where the segment should be allocated", examples=["site1"])
+    type: SegmentType = Field(..., description="Type of segment to allocate", examples=["MCE"])
 
     model_config = {
+        "extra": "forbid",
         "json_schema_extra": {
             "examples": [
                 {
                     "cluster_name": "cluster-prod-01",
                     "site": "site1",
-                    "vrf": "Network1"
+                    "type": "MCE"
                 }
             ]
         }
     }
 
-class VLANAllocationResponse(BaseModel):
+
+class SegmentAllocationResponse(BaseModel):
     vlan_id: int = Field(..., description="Allocated VLAN ID", examples=[100])
     cluster_name: str = Field(..., description="Cluster name", examples=["cluster-prod-01"])
     site: str = Field(..., description="Site name", examples=["site1"])
+    type: SegmentType = Field(..., description="Type of the allocated segment", examples=["MCE"])
     segment: str = Field(..., description="Allocated network segment", examples=["192.168.1.0/24"])
     epg_name: str = Field(..., description="Endpoint Group name", examples=["EPG_PROD_01"])
-    vrf: str = Field(..., description="VRF/Network name", examples=["Network1"])
     allocated_at: datetime = Field(..., description="Allocation timestamp")
 
     model_config = {
@@ -64,41 +73,172 @@ class VLANAllocationResponse(BaseModel):
                     "vlan_id": 100,
                     "cluster_name": "cluster-prod-01",
                     "site": "site1",
+                    "type": "MCE",
                     "segment": "192.168.1.0/24",
                     "epg_name": "EPG_PROD_01",
-                    "vrf": "Network1",
                     "allocated_at": "2024-01-15T10:30:00Z"
                 }
             ]
         }
     }
 
-class VLANRelease(BaseModel):
-    cluster_name: str = Field(..., description="Name of the cluster to release", examples=["cluster-prod-01"])
-    site: str = Field(..., description="Site where cluster is allocated", examples=["site1"])
-    vrf: str = Field(..., description="VRF/Network to release from", examples=["Network1"])
+
+class SegmentUnlock(BaseModel):
+    segment: str = Field(..., description="Network segment in CIDR notation (unique per segment)", examples=["192.168.1.0/24"])
 
     model_config = {
+        "extra": "forbid",
         "json_schema_extra": {
             "examples": [
                 {
-                    "cluster_name": "cluster-prod-01",
-                    "site": "site1",
-                    "vrf": "Network1"
+                    "segment": "192.168.1.0/24"
                 }
             ]
         }
     }
 
-class LoginRequest(BaseModel):
-    username: str = Field(..., description="Username", examples=["admin"])
-    password: str = Field(..., description="Password", examples=["admin"])
 
-class LoginResponse(BaseModel):
-    success: bool = Field(..., description="Whether login was successful")
-    message: str = Field(..., description="Response message")
-    token: Optional[str] = Field(None, description="Session token for API authentication (use as Bearer token)")
+class SegmentConnectivityRequestsUpdate(BaseModel):
+    """Pending segment-connectivity (firewall) request ids to display for a segment.
 
-class AuthStatusResponse(BaseModel):
-    authenticated: bool = Field(..., description="Whether user is authenticated")
+    Sent by the segment-connectivity orchestrator while its firewall requests await
+    approval; the UI shows the ids beside the segment's status. An empty list
+    clears the display (all requests completed).
+    """
+    segment: str = Field(..., description="Network segment in CIDR notation (unique per segment)", examples=["192.168.1.0/24"])
+    request_ids: List[int] = Field(..., description="Pending segment-connectivity request ids; an empty list clears the display", examples=[[123456, 654321]])
+    submitted_at: Optional[datetime] = Field(default=None, description="When these requests were originally submitted; drives the \"time since submit\" header in the UI popover. Ignored/cleared when request_ids is empty.", examples=["2024-01-15T10:30:00Z"])
 
+    model_config = {
+        "extra": "forbid",
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "segment": "192.168.1.0/24",
+                    "request_ids": [123456, 654321],
+                    "submitted_at": "2024-01-15T10:30:00Z"
+                }
+            ]
+        }
+    }
+
+
+class SegmentConnectivityFailure(BaseModel):
+    """A terminal segment-connectivity-workflow failure to display for a segment.
+
+    Sent by the segment-connectivity orchestrator when its workflow fails or is
+    cancelled after submission. The UI shows a "Workflow failed" note beside
+    the segment's status; the segment stays Locked (segment-connectivity was never
+    established). Cleared automatically when a fresh set of request ids is
+    published for the segment (a new run supersedes the stale failure).
+    """
+    segment: str = Field(..., description="Network segment in CIDR notation (unique per segment)", examples=["192.168.1.0/24"])
+    message: str = Field(..., min_length=1, description="Human-readable failure reason shown in the UI popover (includes any orphaned request ids)", examples=["Segment-connectivity workflow failed: no same-site MCE segments found (orphaned next request ids: [496252, 825197])"])
+
+    model_config = {
+        "extra": "forbid",
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "segment": "192.168.1.0/24",
+                    "message": "Segment-connectivity workflow failed: no same-site MCE segments found"
+                }
+            ]
+        }
+    }
+
+
+class SegmentDhcpUpdate(BaseModel):
+    """Update request keyed by the segment's natural key (its CIDR).
+
+    `dhcp` is the only in-place-editable segment field — identity fields
+    (site, vlan_id, epg_name, segment) are immutable after creation, `type`
+    changes only through the conversion endpoint (PUT /segments/type), and
+    lifecycle fields are server-managed.
+    """
+    segment: str = Field(..., description="Network segment in CIDR notation (unique per segment)", examples=["192.168.1.0/24"])
+    dhcp: bool = Field(..., description="New DHCP setting for this segment")
+
+    model_config = {
+        "extra": "forbid",
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "segment": "192.168.1.0/24",
+                    "dhcp": True
+                }
+            ]
+        }
+    }
+
+
+class SegmentTypeUpdate(BaseModel):
+    """Request for PUT /api/segments/type — convert a segment to another type.
+
+    `type` is the NEW type to set. `expected_type` is an optional
+    compare-and-set guard: the current type the caller believes it is
+    converting FROM. If the stored type matches neither `type` (already
+    converted) nor `expected_type`, the conversion is refused (409) — another
+    caller re-typed the segment first.
+    """
+    segment: str = Field(..., description="Network segment in CIDR notation (unique per segment)", examples=["192.168.1.0/24"])
+    type: SegmentType = Field(..., description="New segment type to set", examples=["MCE"])
+    expected_type: Optional[SegmentType] = Field(
+        default=None,
+        description="Compare-and-set guard: the current type being converted from; 409 if the stored type differs (unless it already equals the new type)",
+        examples=["HC"],
+    )
+
+    model_config = {
+        "extra": "forbid",
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "segment": "192.168.1.0/24",
+                    "type": "MCE",
+                    "expected_type": "HC"
+                }
+            ]
+        }
+    }
+
+
+class SegmentClustersUpdate(BaseModel):
+    segment: str = Field(..., description="Network segment in CIDR notation (unique per segment)", examples=["192.168.1.0/24"])
+    cluster_name: Optional[str] = Field(
+        default=None,
+        description="Cluster name to assign (one segment belongs to at most one cluster); empty or omitted releases the segment",
+        examples=["cluster-prod-01"],
+    )
+
+    model_config = {
+        "extra": "forbid",
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "segment": "192.168.1.0/24",
+                    "cluster_name": "cluster-prod-01"
+                }
+            ]
+        }
+    }
+
+
+class SegmentRelease(BaseModel):
+    """Request for POST /api/segments/release, keyed by the segment CIDR.
+
+    The CIDR is globally unique, so it alone identifies the allocation — no
+    site, cluster_name or type is needed (or accepted).
+    """
+    segment: str = Field(..., description="Network segment in CIDR notation (unique per segment)", examples=["192.168.1.0/24"])
+
+    model_config = {
+        "extra": "forbid",
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "segment": "192.168.1.0/24"
+                }
+            ]
+        }
+    }

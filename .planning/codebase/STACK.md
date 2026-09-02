@@ -135,7 +135,7 @@
 **Configuration:**
 - Configured in `src/config/settings.py::setup_logging()`
 - Rotating file handler: 50MB per file, keeps 5 backups
-- Log file: `vlan_manager.log`
+- Log file: `segments_manager.log`
 - Console output to stdout
 - Format: `%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] %(funcName)s() - %(message)s`
 

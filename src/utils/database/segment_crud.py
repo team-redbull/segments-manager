@@ -6,10 +6,11 @@ Handles create, read, update, delete operations for segments.
 import logging
 from typing import Optional, Dict, Any
 
-from ...database.netbox_segments import (
+from ...database import (
     create_segment as _create_segment,
-    get_segment_by_id as _get_segment_by_id,
+    get_segment_by_segment as _get_segment_by_segment,
     update_segment as _update_segment,
+    convert_segment_type as _convert_segment_type,
     delete_segment as _delete_segment,
 )
 
@@ -30,8 +31,6 @@ class SegmentCRUD:
             **segment_data,
             "cluster_name": None,
             "allocated_at": None,
-            "released": False,
-            "released_at": None
         }
 
         result = await _create_segment(new_segment)
@@ -45,14 +44,27 @@ class SegmentCRUD:
             return str(result.get("_id", result)) if isinstance(result, dict) else str(result)
 
     @staticmethod
-    async def get_segment_by_id(segment_id: str) -> Optional[Dict[str, Any]]:
-        """Get segment by ID"""
-        return await _get_segment_by_id(segment_id)
+    async def get_segment_by_segment(segment: str) -> Optional[Dict[str, Any]]:
+        """Get segment by its CIDR value (unique)"""
+        return await _get_segment_by_segment(segment)
 
     @staticmethod
     async def update_segment_by_id(segment_id: str, update_data: Dict[str, Any]) -> bool:
         """Update segment by ID"""
         return await _update_segment(segment_id, update_data)
+
+    @staticmethod
+    async def convert_segment_type(
+        segment_value: str,
+        converted_state: Dict[str, Any],
+        allowed_from_types: Optional[list] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Atomically convert a segment's type; returns the pre-update segment,
+        or None when the guard (not Allocated, still an allowed source type)
+        did not match."""
+        return await _convert_segment_type(
+            segment_value, converted_state, allowed_from_types
+        )
 
     @staticmethod
     async def delete_segment_by_id(segment_id: str) -> bool:

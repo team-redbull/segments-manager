@@ -270,7 +270,7 @@
 **Logging:** Structured logging with module-level loggers
 - Logger initialization: `setup_logging()` in `src/config/settings.py`
 - Format: `%(asctime)s - %(name)s - %(levelname)s - %(message)s`
-- File output: `vlan_manager.log` (rotating)
+- File output: `segments_manager.log` (rotating)
 - Level: Configurable via `LOG_LEVEL` env var (default: INFO)
 
 **Validation:** Multi-layer defense with early fail-fast

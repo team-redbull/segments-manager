@@ -1,14 +1,14 @@
 from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import HTMLResponse, Response, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 
-from .config.settings import setup_logging, SITES, validate_site_prefixes
+from .config.settings import setup_logging, SITES, validate_site_networks
 from .api.routes import router
-from .database.netbox_storage import init_storage, close_storage
-from .auth.auth import init_sessions
+from .database import init_storage, close_storage
+from .auth.auth import is_authenticated
 import os
 
 # Setup logging
@@ -18,17 +18,13 @@ logger = setup_logging()
 async def lifespan(app: FastAPI):
     # Startup
     try:
-        # Initialize session storage (loads from file)
-        logger.info("Initializing session storage...")
-        init_sessions()
-
-        # Validate site prefixes configuration before anything else
-        logger.info("Validating site prefixes configuration...")
-        validate_site_prefixes()
-        logger.info("Site prefixes validation passed")
+        # Validate site network configuration before anything else
+        logger.info("Validating site networks configuration...")
+        validate_site_networks()
+        logger.info("Site networks validation passed")
 
         await init_storage()
-        logger.info(f"NetBox storage initialized. Managing sites: {SITES}")
+        logger.info(f"MongoDB storage initialized. Managing sites: {SITES}")
     except Exception as e:
         logger.error(f"Failed to initialize application: {e}")
         raise
@@ -39,7 +35,7 @@ async def lifespan(app: FastAPI):
     await close_storage()
 
 # FastAPI app - used by uvicorn server
-app = FastAPI(title="VLAN Manager API", lifespan=lifespan)
+app = FastAPI(title="Segments Manager API", lifespan=lifespan)
 
 # Custom StaticFiles class with caching headers
 class CachedStaticFiles(StaticFiles):
@@ -50,13 +46,12 @@ class CachedStaticFiles(StaticFiles):
         path = Path(full_path)
         file_extension = path.suffix.lower()
         
-        # Add cache headers for static assets
-        if file_extension in ['.css', '.js', '.png', '.jpg', '.jpeg', '.gif', '.ico', '.svg']:
-            # Cache for 1 year (static assets with versioning)
-            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
-        elif file_extension in ['.html']:
-            # Cache HTML for 1 hour but allow revalidation
-            response.headers["Cache-Control"] = "public, max-age=3600, must-revalidate"
+        # Add cache headers for static assets. Filenames aren't content-hashed,
+        # so assets must always revalidate (via the ETag/Last-Modified above) —
+        # long max-age/immutable caching would let browsers run stale JS/CSS
+        # for up to a year after a deploy.
+        if file_extension in ['.css', '.js', '.html', '.png', '.jpg', '.jpeg', '.gif', '.ico', '.svg']:
+            response.headers["Cache-Control"] = "no-cache"
         else:
             # Default cache for other files
             response.headers["Cache-Control"] = "public, max-age=86400"  # 1 day
@@ -66,7 +61,37 @@ class CachedStaticFiles(StaticFiles):
 # Mount static files with caching
 app.mount("/static", CachedStaticFiles(directory="static"), name="static")
 
-# CORS middleware
+# Read (GET/HEAD) API calls stay open so the web UI needs no authentication;
+# every mutating call must present a valid API token via the Authorization
+# header. There is no username/password login — the token is the only credential.
+_PUBLIC_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+
+@app.middleware("http")
+async def enforce_api_auth(request: Request, call_next):
+    """Require a valid API token for all mutating /api/* requests.
+
+    Enforced centrally (fail-closed) so any new write endpoint is protected by
+    default. Clients send an `Authorization: Bearer <API_TOKEN>` header.
+    """
+    if (
+        request.url.path.startswith("/api/")
+        and request.method not in _PUBLIC_METHODS
+        and not is_authenticated(request)
+    ):
+        return JSONResponse(
+            status_code=401,
+            content={
+                "detail": "Authentication required. Provide a valid API token via "
+                "'Authorization: Bearer <token>'."
+            },
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return await call_next(request)
+
+
+# CORS middleware — added last so it stays the outermost layer and applies its
+# headers to every response, including preflight and the 401s above.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -78,11 +103,36 @@ app.add_middleware(
 # Include API routes
 app.include_router(router, prefix="/api")
 
+
+# Auth is enforced by the middleware above, not by per-route dependencies, so
+# FastAPI generates no security scheme on its own and /docs would offer no way
+# to send the token. Declare the Bearer scheme here (documentation only) so
+# Swagger UI shows the Authorize button.
+def custom_openapi():
+    if app.openapi_schema:
+        return app.openapi_schema
+    from fastapi.openapi.utils import get_openapi
+
+    schema = get_openapi(
+        title=app.title,
+        version=app.version,
+        routes=app.routes,
+    )
+    schema.setdefault("components", {})["securitySchemes"] = {
+        "BearerAuth": {"type": "http", "scheme": "bearer"}
+    }
+    schema["security"] = [{"BearerAuth": []}]
+    app.openapi_schema = schema
+    return schema
+
+
+app.openapi = custom_openapi
+
 # HTML UI - Serve static HTML file
 @app.get("/", response_class=HTMLResponse)
 async def read_root():
     try:
         with open("static/html/index.html", "r", encoding="utf-8") as f:
-            return f.read()
+            return HTMLResponse(content=f.read(), headers={"Cache-Control": "no-cache"})
     except FileNotFoundError:
         return HTMLResponse(content="<h1>Error: index.html not found</h1>", status_code=500)
