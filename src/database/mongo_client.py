@@ -10,7 +10,12 @@ from typing import Optional
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase, AsyncIOMotorCollection
 from fastapi import HTTPException
 
-from ..config.settings import MONGODB_URL, MONGODB_DB_NAME, MONGODB_TLS_INSECURE
+from ..config.settings import (
+    MONGODB_URL,
+    MONGODB_DB_NAME,
+    MONGODB_COLLECTION,
+    MONGODB_TLS_INSECURE,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -62,4 +67,4 @@ def get_db() -> AsyncIOMotorDatabase:
 
 def get_segments_collection() -> AsyncIOMotorCollection:
     """Return the segments collection."""
-    return get_db()["segments"]
+    return get_db()[MONGODB_COLLECTION]

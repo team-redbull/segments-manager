@@ -122,7 +122,9 @@ async def init_storage() -> None:
     await _drop_released_fields(col)
     await _backfill_segment_type(col)
 
-    logger.info("MongoDB storage initialised — indexes ensured on 'segments' collection")
+    logger.info(
+        "MongoDB storage initialised — indexes ensured on '%s' collection", col.name
+    )
 
 
 async def close_storage() -> None:

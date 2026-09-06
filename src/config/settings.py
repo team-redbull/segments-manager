@@ -16,6 +16,10 @@ load_dotenv()
 # MongoDB Configuration
 MONGODB_URL = os.getenv("MONGODB_URL")
 MONGODB_DB_NAME = os.getenv("MONGODB_DB_NAME", "segments_manager")
+# Collection holding the segment documents. Configurable so one database can
+# host several independent segment sets (e.g. a scratch collection alongside
+# production); the default is what every existing deployment already uses.
+MONGODB_COLLECTION = os.getenv("MONGODB_COLLECTION", "segments")
 
 # When true, skip TLS certificate verification for the MongoDB connection
 # (equivalent to "verify: false"). Keeps the connection encrypted but does not
