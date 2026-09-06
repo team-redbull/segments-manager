@@ -47,7 +47,7 @@ python main.py            # serves http://localhost:8000
 ```bash
 MONGODB_URL="mongodb://localhost:27017"          # or mongodb+srv://... for Atlas — REQUIRED (fail-fast if unset)
 MONGODB_DB_NAME="segments_manager"                    # optional, default: segments_manager
-SITE_NETWORKS='{"site1": {"pool": "192.10.0.0/16", "bmc": "10.50.0.0/16"}, "site2": {"pool": "193.51.0.0/16", "bmc": "10.51.0.0/16"}, "site3": {"pool": "194.52.0.0/16", "bmc": "10.52.0.0/16"}}'  # REQUIRED. JSON site topology; the single source of truth for
+SITE_NETWORKS='{"site1": {"pool": "192.10.0.0/16", "dell-bmc": "10.50.0.0/16", "cisco-bmc": "10.60.0.0/16"}, "site2": {"pool": "193.51.0.0/16", "dell-bmc": "10.51.0.0/16", "cisco-bmc": "10.61.0.0/16"}, "site3": {"pool": "194.52.0.0/16", "dell-bmc": "10.52.0.0/16", "cisco-bmc": "10.62.0.0/16"}}'  # REQUIRED. JSON site topology; the single source of truth for
                                                     # configured sites; SITES is derived from its keys (no separate var)
 API_TOKEN="<long-random-secret>"                   # REQUIRED (fail-fast) — Bearer token for write requests
 ```
@@ -68,7 +68,7 @@ SEGMENTS_MANAGER_URL=http://host:8000 pytest tests/ -v # target elsewhere
 ```
 
 The server under test must be configured with
-`SITE_NETWORKS='{"site1": {"pool": "192.10.0.0/16", "bmc": "10.50.0.0/16"}, "site2": {"pool": "193.51.0.0/16", "bmc": "10.51.0.0/16"}, "site3": {"pool": "194.52.0.0/16", "bmc": "10.52.0.0/16"}}'`. To test the container image, run a
+`SITE_NETWORKS='{"site1": {"pool": "192.10.0.0/16", "dell-bmc": "10.50.0.0/16", "cisco-bmc": "10.60.0.0/16"}, "site2": {"pool": "193.51.0.0/16", "dell-bmc": "10.51.0.0/16", "cisco-bmc": "10.61.0.0/16"}, "site3": {"pool": "194.52.0.0/16", "dell-bmc": "10.52.0.0/16", "cisco-bmc": "10.62.0.0/16"}}'`. To test the container image, run a
 throwaway MongoDB + the image on a shared podman network (see `tests/README.md`).
 
 ### Container Deployment (Podman)

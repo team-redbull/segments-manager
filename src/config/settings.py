@@ -52,14 +52,17 @@ if not MONGODB_URL:
 # can never drift out of sync.
 #
 # JSON object keyed by site name:
-#   {"site1": {"pool": "192.10.0.0/16", "bmc": "10.50.0.0/16"}, ...}
+#   {"site1": {"pool": "192.10.0.0/16",
+#              "dell-bmc": "10.50.0.0/16", "cisco-bmc": "10.60.0.0/16"}, ...}
 #
-#   pool  the /16 (or narrower) every segment at that site must fall INSIDE.
-#         Read on every create — see NetworkValidators.validate_segment_format.
-#   bmc   the site's static out-of-band management network. This service never
-#         reads it per-request; it exists here only so startup can check that no
-#         pool collides with a management network. The segment-connectivity
-#         workflow is the component that actually uses it (firewall rules).
+#   pool       the /16 (or narrower) every segment at that site must fall INSIDE.
+#              Read on every create — see NetworkValidators.validate_segment_format.
+#   dell-bmc   the site's static out-of-band management networks, ONE PER SERVER
+#   cisco-bmc  HARDWARE VENDOR — Dell and Cisco BMCs sit on separate /16s. This
+#              service never reads them per-request; they exist here only so
+#              startup can check that no pool collides with a management network.
+#              The segment-connectivity workflow is the component that actually
+#              uses them (it opens firewall rules from each MCE segment to both).
 #
 # The same structure is consumed by segment-connectivity, so wherever an
 # environment defines it, it must be defined ONCE and rendered into both
@@ -72,9 +75,13 @@ SITE_NETWORKS_ENV = os.getenv("SITE_NETWORKS", "")
 # Superseded by SITE_NETWORKS. Read only to detect a stale ConfigMap; never used.
 _LEGACY_SITE_PREFIXES_ENV = os.getenv("SITE_PREFIXES", "")
 
+_BMC_KEYS = ("dell-bmc", "cisco-bmc")
+
 _SITE_NETWORKS_EXAMPLE = (
-    'SITE_NETWORKS=\'{"site1": {"pool": "192.10.0.0/16", "bmc": "10.50.0.0/16"}, '
-    '"site2": {"pool": "193.51.0.0/16", "bmc": "10.51.0.0/16"}}\''
+    'SITE_NETWORKS=\'{"site1": {"pool": "192.10.0.0/16", '
+    '"dell-bmc": "10.50.0.0/16", "cisco-bmc": "10.60.0.0/16"}, '
+    '"site2": {"pool": "193.51.0.0/16", '
+    '"dell-bmc": "10.51.0.0/16", "cisco-bmc": "10.61.0.0/16"}}\''
 )
 
 
@@ -146,9 +153,12 @@ def parse_site_networks(raw: str):
         pool = _parse_cidr(site, "pool", value["pool"], errors)
         if pool is not None:
             pools[site] = pool
-        # bmc is optional; parsed only to validate it and to check disjointness.
-        if "bmc" in value:
-            _parse_cidr(site, "bmc", value["bmc"], errors)
+        # The BMC keys are optional here (this service never reads them per
+        # request); parsed only to validate them and to check disjointness.
+        # There is one per server hardware vendor — see the header.
+        for bmc_key in _BMC_KEYS:
+            if bmc_key in value:
+                _parse_cidr(site, bmc_key, value[bmc_key], errors)
 
         networks[site] = value
 
@@ -174,7 +184,7 @@ def _parse_cidr(site: str, key: str, value, errors: list):
 
 
 def _find_overlaps(parsed: dict, pools: dict) -> list:
-    """Check that no pool overlaps another pool or any site's BMC network.
+    """Check that no pool overlaps another pool or any site's BMC networks.
 
     Two overlapping pools would make site containment ambiguous. A pool
     overlapping a BMC network means segments would be allocated on top of an
@@ -182,6 +192,12 @@ def _find_overlaps(parsed: dict, pools: dict) -> list:
     validation checks containment first, and pools are disjoint from the BMC
     ranges by design, so no segment that passes containment can ever reach a BMC
     conflict. Startup is the only place these can be caught.
+
+    Every vendor's BMC network is checked, not just one: a site has a Dell and a
+    Cisco management /16, and a pool colliding with either is the same fault.
+    Deliberately NOT checked: BMC-vs-BMC overlap. This service owns `pool`, and
+    inventing invariants over keys it never reads is how the two services'
+    validation drifts apart.
     """
     errors = []
     sites = list(pools)
@@ -195,18 +211,21 @@ def _find_overlaps(parsed: dict, pools: dict) -> list:
                 )
 
     for bmc_site, value in parsed.items():
-        if not isinstance(value, dict) or "bmc" not in value:
+        if not isinstance(value, dict):
             continue
-        try:
-            bmc = ipaddress.ip_network(value["bmc"], strict=True)
-        except (ValueError, TypeError):
-            continue  # already reported by _parse_cidr
-        for pool_site, pool in pools.items():
-            if pool.overlaps(bmc):
-                errors.append(
-                    f"site '{pool_site}' pool {pool} overlaps site "
-                    f"'{bmc_site}' BMC network {bmc}"
-                )
+        for bmc_key in _BMC_KEYS:
+            if bmc_key not in value:
+                continue
+            try:
+                bmc = ipaddress.ip_network(value[bmc_key], strict=True)
+            except (ValueError, TypeError):
+                continue  # already reported by _parse_cidr
+            for pool_site, pool in pools.items():
+                if pool.overlaps(bmc):
+                    errors.append(
+                        f"site '{pool_site}' pool {pool} overlaps site "
+                        f"'{bmc_site}' {bmc_key} BMC network {bmc}"
+                    )
     return errors
 
 
@@ -255,10 +274,12 @@ def validate_site_networks():
     summary = ", ".join(f"{site}={pool}" for site, pool in SITE_POOLS.items())
     print(f"INFO: Site networks validated: {summary}", file=sys.stderr)
 
-    # A typo'd sub-key (e.g. "bcm") is silently ignored here but crash-loops the
-    # segment-connectivity worker, which requires it. Surface it in this log too.
+    # A typo'd sub-key (e.g. "dell-bcm") is silently ignored here but crash-loops
+    # the segment-connectivity worker, which requires both BMC keys. Surface it in
+    # this log too. A bare "bmc" lands here as well: it is the pre-vendor-split
+    # key, and a ConfigMap still carrying it has not been migrated.
     for site, value in SITE_NETWORKS.items():
-        unknown = sorted(set(value) - {"pool", "bmc"})
+        unknown = sorted(set(value) - {"pool", *_BMC_KEYS})
         if unknown:
             print(
                 f"INFO: site '{site}' has unrecognised SITE_NETWORKS sub-keys "
@@ -290,7 +311,7 @@ def get_site_pool(site: str):
 
 
 def get_site_networks(site: str):
-    """Return the site's raw topology dict (pool, bmc, ...), or None if unknown."""
+    """Return the site's raw topology dict (pool, dell-bmc, ...), or None if unknown."""
     canonical = resolve_site(site)
     return SITE_NETWORKS.get(canonical) if canonical else None
 

@@ -9,9 +9,12 @@ container image). Configure the target with environment variables:
                                 then "test-token")
 
 The suite assumes the server is configured with:
-    SITE_NETWORKS={"site1": {"pool": "192.10.0.0/16", "bmc": "10.50.0.0/16"},
-                   "site2": {"pool": "193.51.0.0/16", "bmc": "10.51.0.0/16"},
-                   "site3": {"pool": "194.52.0.0/16", "bmc": "10.52.0.0/16"}}
+    SITE_NETWORKS={"site1": {"pool": "192.10.0.0/16",
+                             "dell-bmc": "10.50.0.0/16", "cisco-bmc": "10.60.0.0/16"},
+                   "site2": {"pool": "193.51.0.0/16",
+                             "dell-bmc": "10.51.0.0/16", "cisco-bmc": "10.61.0.0/16"},
+                   "site3": {"pool": "194.52.0.0/16",
+                             "dell-bmc": "10.52.0.0/16", "cisco-bmc": "10.62.0.0/16"}}
     API_TOKEN=test-token   (or match SEGMENTS_MANAGER_API_TOKEN)
 """
 

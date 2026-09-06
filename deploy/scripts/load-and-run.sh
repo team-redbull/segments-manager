@@ -46,7 +46,7 @@ else
     # Assigned in a plain if rather than ${VAR:-default}: the JSON's nested
     # braces confuse that expansion and it silently truncates to the first site.
     if [ -z "$SITE_NETWORKS" ]; then
-        SITE_NETWORKS='{"site1": {"pool": "192.10.0.0/16", "bmc": "10.50.0.0/16"}, "site2": {"pool": "193.51.0.0/16", "bmc": "10.51.0.0/16"}, "site3": {"pool": "194.52.0.0/16", "bmc": "10.52.0.0/16"}}'
+        SITE_NETWORKS='{"site1": {"pool": "192.10.0.0/16", "dell-bmc": "10.50.0.0/16", "cisco-bmc": "10.60.0.0/16"}, "site2": {"pool": "193.51.0.0/16", "dell-bmc": "10.51.0.0/16", "cisco-bmc": "10.61.0.0/16"}, "site3": {"pool": "194.52.0.0/16", "dell-bmc": "10.52.0.0/16", "cisco-bmc": "10.62.0.0/16"}}'
     fi
     export SITE_NETWORKS
     export SERVER_PORT="${SERVER_PORT:-8000}"

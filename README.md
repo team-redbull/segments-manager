@@ -75,7 +75,7 @@ podman run -d --name segments-manager -p 8000:8000 --env-file .env segments-mana
 ```bash
 helm install segments-manager deploy/helm \
   --set mongodb.url="mongodb+srv://user:pass@cluster/..." \
-  --set-json siteNetworks='{"site1": {"pool": "192.10.0.0/16", "bmc": "10.50.0.0/16"}}'
+  --set-json siteNetworks='{"site1": {"pool": "192.10.0.0/16", "dell-bmc": "10.50.0.0/16", "cisco-bmc": "10.60.0.0/16"}}'
 ```
 
 In a cluster, prefer defining `siteNetworks` once per environment and merging it
@@ -99,9 +99,10 @@ MONGODB_DB_NAME=segments_manager                 # optional (default: segments_m
 # Sites (Required) — the single source of truth for configured sites. JSON
 # keyed by site name; the list of sites is derived from its keys.
 #   pool  the CIDR every segment at that site must fall INSIDE
-#   bmc   the site's out-of-band management network. Optional, never read
-#         per-request; used only at startup to verify no pool collides with it.
-SITE_NETWORKS={"site1": {"pool": "192.10.0.0/16", "bmc": "10.50.0.0/16"}, "site2": {"pool": "193.51.0.0/16", "bmc": "10.51.0.0/16"}, "site3": {"pool": "194.52.0.0/16", "bmc": "10.52.0.0/16"}}
+#   dell-bmc   the site's out-of-band management networks, one per server
+#   cisco-bmc  hardware vendor. Optional, never read per-request; used only at
+#              startup to verify no pool collides with either.
+SITE_NETWORKS={"site1": {"pool": "192.10.0.0/16", "dell-bmc": "10.50.0.0/16", "cisco-bmc": "10.60.0.0/16"}, "site2": {"pool": "193.51.0.0/16", "dell-bmc": "10.51.0.0/16", "cisco-bmc": "10.61.0.0/16"}, "site3": {"pool": "194.52.0.0/16", "dell-bmc": "10.52.0.0/16", "cisco-bmc": "10.62.0.0/16"}}
 
 # Server (Optional)
 SERVER_PORT=8000

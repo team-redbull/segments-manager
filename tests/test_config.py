@@ -24,8 +24,10 @@ import pytest
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 VALID = {
-    "site1": {"pool": "192.10.0.0/16", "bmc": "10.50.0.0/16"},
-    "site2": {"pool": "193.51.0.0/16", "bmc": "10.51.0.0/16"},
+    "site1": {"pool": "192.10.0.0/16",
+              "dell-bmc": "10.50.0.0/16", "cisco-bmc": "10.60.0.0/16"},
+    "site2": {"pool": "193.51.0.0/16",
+              "dell-bmc": "10.51.0.0/16", "cisco-bmc": "10.61.0.0/16"},
 }
 
 _SCRIPT = (
@@ -73,14 +75,27 @@ class TestValidConfig:
     def test_unknown_sub_key_is_tolerated(self):
         """The shared topology is rendered whole into both services' ConfigMaps,
         so a sub-key this service does not own must never break it."""
-        cfg = {"site1": {"pool": "192.10.0.0/16", "bmc": "10.50.0.0/16", "future": 1}}
+        cfg = {"site1": {"pool": "192.10.0.0/16", "dell-bmc": "10.50.0.0/16",
+                         "cisco-bmc": "10.60.0.0/16", "future": 1}}
         r = run_startup(json.dumps(cfg))
         assert r.returncode == 0, r.stderr
         assert "unrecognised" in r.stderr
 
-    def test_bmc_is_optional(self):
+    def test_bmc_keys_are_optional(self):
+        """This service owns `pool`. The vendor BMC keys are the
+        segment-connectivity worker's, and it is the one that requires them."""
         r = run_startup(json.dumps({"site1": {"pool": "192.10.0.0/16"}}))
         assert r.returncode == 0, r.stderr
+
+    def test_legacy_single_bmc_key_starts_but_is_flagged(self):
+        """A ConfigMap still on the pre-vendor-split shape must not stop THIS
+        service — it never reads the key. But it crash-loops the
+        segment-connectivity worker, so say so in the log."""
+        cfg = {"site1": {"pool": "192.10.0.0/16", "bmc": "10.50.0.0/16"}}
+        r = run_startup(json.dumps(cfg))
+        assert r.returncode == 0, r.stderr
+        assert "unrecognised" in r.stderr
+        assert "bmc" in r.stderr
 
 
 class TestLegacyVar:
@@ -112,7 +127,7 @@ class TestInvalidConfig:
         assert_refused(run_startup("{}"), "non-empty JSON object")
 
     def test_missing_pool_names_the_site(self):
-        cfg = {"site1": {"bmc": "10.50.0.0/16"}}
+        cfg = {"site1": {"dell-bmc": "10.50.0.0/16"}}
         assert_refused(run_startup(json.dumps(cfg)), "site 'site1' has no \"pool\" key")
 
     @pytest.mark.parametrize("pool", ["192.10.0.1/16", "not-a-cidr", "192.10.0.0/33"])
@@ -129,12 +144,19 @@ class TestInvalidConfig:
                "site2": {"pool": "192.10.5.0/24"}}
         assert_refused(run_startup(json.dumps(cfg)), "overlaps site 'site2' pool")
 
-    def test_pool_overlapping_a_bmc_network_refuses(self):
-        """The check that justifies `bmc` living in this service's config at all:
-        request validation can never catch it, because containment runs first."""
+    @pytest.mark.parametrize("bmc_key", ["dell-bmc", "cisco-bmc"])
+    def test_pool_overlapping_a_bmc_network_refuses(self, bmc_key):
+        """The check that justifies the BMC keys living in this service's config
+        at all: request validation can never catch it, because containment runs
+        first. EVERY vendor's network is checked, not just the first."""
         cfg = {"site1": {"pool": "10.50.0.0/16"},
-               "site2": {"pool": "193.51.0.0/16", "bmc": "10.50.0.0/16"}}
-        assert_refused(run_startup(json.dumps(cfg)), "BMC network")
+               "site2": {"pool": "193.51.0.0/16", bmc_key: "10.50.0.0/16"}}
+        assert_refused(run_startup(json.dumps(cfg)), f"{bmc_key} BMC network")
+
+    @pytest.mark.parametrize("bmc_key", ["dell-bmc", "cisco-bmc"])
+    def test_bad_bmc_cidr_refuses(self, bmc_key):
+        cfg = {"site1": {"pool": "192.10.0.0/16", bmc_key: "10.50.0.1/16"}}
+        assert_refused(run_startup(json.dumps(cfg)), f"invalid {bmc_key} CIDR")
 
     def test_sites_differing_only_by_case_refuse(self):
         cfg = {"site1": {"pool": "192.10.0.0/16"},
