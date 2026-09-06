@@ -49,9 +49,7 @@ else
         SITE_NETWORKS='{"site1": {"pool": "192.10.0.0/16", "bmc": "10.50.0.0/16"}, "site2": {"pool": "193.51.0.0/16", "bmc": "10.51.0.0/16"}, "site3": {"pool": "194.52.0.0/16", "bmc": "10.52.0.0/16"}}'
     fi
     export SITE_NETWORKS
-    export SERVER_HOST="${SERVER_HOST:-0.0.0.0}"
     export SERVER_PORT="${SERVER_PORT:-8000}"
-    export LOG_LEVEL="${LOG_LEVEL:-INFO}"
 fi
 
 echo ""
@@ -87,10 +85,8 @@ podman run -d \
     -e MONGODB_URL="$MONGODB_URL" \
     -e MONGODB_DB_NAME="$MONGODB_DB_NAME" \
     -e SITE_NETWORKS="$SITE_NETWORKS" \
-    -e SERVER_HOST="$SERVER_HOST" \
     -e SERVER_PORT="$SERVER_PORT" \
-    -e LOG_LEVEL="$LOG_LEVEL" \
-    -v ./logs:/app/logs:Z \
+    -v ./data:/app/data:Z \
     $IMAGE_NAME:$IMAGE_TAG
 
 if [ $? -eq 0 ]; then

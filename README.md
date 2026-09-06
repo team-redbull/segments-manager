@@ -78,10 +78,10 @@ helm install segments-manager deploy/helm \
   --set-json siteNetworks='{"site1": {"pool": "192.10.0.0/16", "bmc": "10.50.0.0/16"}}'
 ```
 
-In the cluster you do not set `siteNetworks` per service: it is defined once in
-`redbull-platform` (`gitops/values/<env>.yaml`) and merged into every chart that
-needs it, so segments-manager and segment-connectivity cannot disagree about the
-site list. The `--set-json` form above is for standalone installs.
+In a cluster, prefer defining `siteNetworks` once per environment and merging it
+into every chart that needs it, rather than setting it per service — that is what
+keeps segments-manager and segment-connectivity from disagreeing about the site
+list. The `--set-json` form above is for standalone installs.
 
 Use `--set mongodb.existingSecret=<name>` to source `MONGODB_URL` from an existing Secret instead.
 
@@ -104,9 +104,7 @@ MONGODB_DB_NAME=segments_manager                 # optional (default: segments_m
 SITE_NETWORKS={"site1": {"pool": "192.10.0.0/16", "bmc": "10.50.0.0/16"}, "site2": {"pool": "193.51.0.0/16", "bmc": "10.51.0.0/16"}, "site3": {"pool": "194.52.0.0/16", "bmc": "10.52.0.0/16"}}
 
 # Server (Optional)
-SERVER_HOST=0.0.0.0
 SERVER_PORT=8000
-LOG_LEVEL=INFO
 
 # Auth
 API_TOKEN=change-me-to-a-long-random-secret   # REQUIRED — the only credential for write requests

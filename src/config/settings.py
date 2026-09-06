@@ -3,6 +3,7 @@ import json
 import logging
 import ipaddress
 import sys
+from pathlib import Path
 
 from dotenv import load_dotenv
 
@@ -56,9 +57,11 @@ if not MONGODB_URL:
 #         pool collides with a management network. The segment-connectivity
 #         workflow is the component that actually uses it (firewall rules).
 #
-# The same structure is defined ONCE in redbull-platform
-# (gitops/values/<env>.yaml, key `siteNetworks`) and rendered into both this
-# service's ConfigMap and segment-connectivity's. Sub-keys this service does not
+# The same structure is consumed by segment-connectivity, so wherever an
+# environment defines it, it must be defined ONCE and rendered into both
+# services' config — a per-service copy is how the two site lists drift apart.
+# In a Helm/Argo CD deployment that is the chart's `siteNetworks` value, which
+# renders this env var into the ConfigMap. Sub-keys this service does not
 # recognise are ignored on purpose — another consumer may own them.
 SITE_NETWORKS_ENV = os.getenv("SITE_NETWORKS", "")
 
@@ -217,9 +220,12 @@ def validate_site_networks():
             "SITE_PREFIXES was replaced by SITE_NETWORKS (a JSON site topology) and is\n"
             "no longer read. This process is running new code against a stale config.\n"
             f"{_SITE_NETWORKS_EXAMPLE}\n"
-            "In the cluster the value is defined once in redbull-platform\n"
-            "(gitops/values/<env>.yaml, key `siteNetworks`) and rendered into this\n"
-            "service's ConfigMap by helm-charts-segments-manager."
+            "Fix: set SITE_NETWORKS in whatever supplies this deployment's\n"
+            "environment — the ConfigMap on Kubernetes, the .env or -e flags\n"
+            "elsewhere — and remove SITE_PREFIXES. Under Helm/Argo CD it is the\n"
+            "chart's `siteNetworks` value that renders SITE_NETWORKS into the\n"
+            "ConfigMap, so a pod seeing this is running a new image against an\n"
+            "old chart revision or a hand-edited ConfigMap."
         )
         print(f"ERROR: {error_msg}", file=sys.stderr)
         raise ValueError(error_msg)
@@ -286,10 +292,18 @@ def get_site_networks(site: str):
 
 
 # Logging Configuration
-# Path to the rotating log file. Defaults to the current directory for local
-# runs; in the container it is set to a writable location (see Dockerfile /
-# Helm), because the app runs as a non-root user that cannot write to /app.
-LOG_FILE = os.getenv("LOG_FILE", "segments_manager.log")
+# Not configurable. Derived from the package root so the one constant is correct
+# in both places the app runs: `/app/data/segments_manager.log` in the container
+# (the Dockerfile creates that directory world-writable, so it works whatever UID
+# the platform assigns) and `<repo>/data/segments_manager.log` for a local run.
+# The old LOG_FILE env var let a deployment point this at /app, which is not
+# writable under a non-root securityContext — a ConfigMap key whose only real
+# effect was to silently disable file logging and /api/logs.
+LOG_FILE = str(Path(__file__).resolve().parents[2] / "data" / "segments_manager.log")
+
+# Not configurable: this service logs at INFO. Nothing below INFO is worth the
+# volume in production, and DEBUG on a request path leaks segment data into logs.
+LOG_LEVEL = logging.INFO
 
 
 def setup_logging():
@@ -301,13 +315,13 @@ def setup_logging():
     """
     from logging.handlers import RotatingFileHandler
 
-    log_level_str = os.getenv("LOG_LEVEL", "INFO").upper()
-    log_level = getattr(logging, log_level_str, logging.INFO)
     log_format = '%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] %(funcName)s() - %(message)s'
 
     handlers = [logging.StreamHandler(sys.stdout)]
     file_handler_error = None
     try:
+        # The container image ships this directory; create it for local runs.
+        Path(LOG_FILE).parent.mkdir(parents=True, exist_ok=True)
         handlers.append(RotatingFileHandler(
             LOG_FILE,
             maxBytes=50 * 1024 * 1024,
@@ -317,18 +331,23 @@ def setup_logging():
     except OSError as e:  # includes PermissionError
         file_handler_error = e
 
-    logging.basicConfig(level=log_level, format=log_format, handlers=handlers)
+    logging.basicConfig(level=LOG_LEVEL, format=log_format, handlers=handlers)
     logger = logging.getLogger(__name__)
 
     if file_handler_error is not None:
         logger.warning(
             f"File logging disabled: could not open log file '{LOG_FILE}' "
-            f"({file_handler_error}). Logging to stdout only. "
-            f"Set LOG_FILE to a writable path to enable file logging and the /api/logs endpoint."
+            f"({file_handler_error}). Logging to stdout only, and /api/logs will "
+            f"return 404. The path is fixed; make its directory writable by the "
+            f"user this process runs as."
         )
     return logger
 
 
 # Server Configuration
-SERVER_HOST = os.getenv("SERVER_HOST", "0.0.0.0")
+# The bind address is not configurable: in a container the app owns its network
+# namespace, so binding anything narrower than every interface only breaks the
+# kubelet's probes. The port stays configurable — it has to match the chart's
+# service.targetPort.
+SERVER_HOST = "0.0.0.0"
 SERVER_PORT = int(os.getenv("SERVER_PORT", "8000"))

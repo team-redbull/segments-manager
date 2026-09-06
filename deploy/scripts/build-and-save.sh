@@ -82,9 +82,7 @@ MONGODB_DB_NAME=segments_manager
 SITE_NETWORKS='{"site1": {"pool": "192.10.0.0/16", "bmc": "10.50.0.0/16"}, "site2": {"pool": "193.51.0.0/16", "bmc": "10.51.0.0/16"}, "site3": {"pool": "194.52.0.0/16", "bmc": "10.52.0.0/16"}}'
 
 # Server Configuration (Optional)
-SERVER_HOST=0.0.0.0
 SERVER_PORT=8000
-LOG_LEVEL=INFO
 \`\`\`
 EOF
     
