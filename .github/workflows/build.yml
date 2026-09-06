@@ -15,9 +15,10 @@ jobs:
     uses: team-redbull/.github/.github/workflows/ghcr-build-push.yml@main
     with:
       image-name: segments-manager
-      # Chart lives in its own repo now (Argo CD). The bump + vX.Y.Z tag land there.
-      chart-repo: team-redbull/helm-charts-segments-manager
-      helm-values-path: values.yaml
+      # Chart lives in the redbull-platform repo now (Argo CD renders it from there).
+      # The bump + the `segments-manager/vX.Y.Z` tag land there, on main only.
+      chart-repo: team-redbull/redbull-platform
+      helm-values-path: gitops/charts/segments-manager/values.yaml
     secrets: inherit
 
   cleanup-on-delete:
