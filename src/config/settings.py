@@ -15,7 +15,7 @@ load_dotenv()
 
 # MongoDB Configuration
 MONGODB_URL = os.getenv("MONGODB_URL")
-MONGODB_DB_NAME = os.getenv("MONGODB_DB_NAME", "segments_manager")
+MONGODB_DB_NAME = os.getenv("MONGODB_DB_NAME", "segments-manager")
 # Collection holding the segment documents. Configurable so one database can
 # host several independent segment sets (e.g. a scratch collection alongside
 # production); the default is what every existing deployment already uses.

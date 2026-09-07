@@ -46,7 +46,7 @@ python main.py            # serves http://localhost:8000
 
 ```bash
 MONGODB_URL="mongodb://localhost:27017"          # or mongodb+srv://... for Atlas — REQUIRED (fail-fast if unset)
-MONGODB_DB_NAME="segments_manager"                    # optional, default: segments_manager
+MONGODB_DB_NAME="segments-manager"                    # optional, default: segments-manager
 SITE_NETWORKS='{"site1": {"pool": "192.10.0.0/16", "dell-bmc": "10.50.0.0/16", "cisco-bmc": "10.60.0.0/16"}, "site2": {"pool": "193.51.0.0/16", "dell-bmc": "10.51.0.0/16", "cisco-bmc": "10.61.0.0/16"}, "site3": {"pool": "194.52.0.0/16", "dell-bmc": "10.52.0.0/16", "cisco-bmc": "10.62.0.0/16"}}'  # REQUIRED. JSON site topology; the single source of truth for
                                                     # configured sites; SITES is derived from its keys (no separate var)
 API_TOKEN="<long-random-secret>"                   # REQUIRED (fail-fast) — Bearer token for write requests

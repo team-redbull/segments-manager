@@ -42,7 +42,7 @@ else
     
     # Set defaults (WARNING: MONGODB_URL must point at a reachable MongoDB)
     export MONGODB_URL="${MONGODB_URL:-mongodb://localhost:27017}"
-    export MONGODB_DB_NAME="${MONGODB_DB_NAME:-segments_manager}"
+    export MONGODB_DB_NAME="${MONGODB_DB_NAME:-segments-manager}"
     # Assigned in a plain if rather than ${VAR:-default}: the JSON's nested
     # braces confuse that expansion and it silently truncates to the first site.
     if [ -z "$SITE_NETWORKS" ]; then

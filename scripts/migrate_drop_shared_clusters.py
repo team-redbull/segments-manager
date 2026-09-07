@@ -20,7 +20,7 @@ allocate-segment workflow verifies its allocation by comparing `cluster_name`
 with equality, so a leftover comma list would fail its read-back check.
 
 Connection uses the same env vars as the app (MONGODB_URL required,
-MONGODB_DB_NAME default 'segments_manager', MONGODB_TLS_INSECURE honoured), or
+MONGODB_DB_NAME default 'segments-manager', MONGODB_TLS_INSECURE honoured), or
 override via --uri/--db. Requires pymongo (a motor dependency, already installed).
 """
 
@@ -81,8 +81,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--uri", default=os.getenv("MONGODB_URL"),
                         help="Mongo connection string (default: $MONGODB_URL)")
-    parser.add_argument("--db", default=os.getenv("MONGODB_DB_NAME", "segments_manager"),
-                        help="database name (default: $MONGODB_DB_NAME or 'segments_manager')")
+    parser.add_argument("--db", default=os.getenv("MONGODB_DB_NAME", "segments-manager"),
+                        help="database name (default: $MONGODB_DB_NAME or 'segments-manager')")
     parser.add_argument("--collection", default="segments")
     parser.add_argument("--report", action="store_true",
                         help="list shared segments without modifying anything (the default mode)")

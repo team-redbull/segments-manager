@@ -94,7 +94,7 @@ Use `--set mongodb.existingSecret=<name>` to source `MONGODB_URL` from an existi
 ```bash
 # MongoDB (Required)
 MONGODB_URL=mongodb://localhost:27017        # or mongodb+srv://... for Atlas
-MONGODB_DB_NAME=segments_manager                 # optional (default: segments_manager)
+MONGODB_DB_NAME=segments-manager                 # optional (default: segments-manager)
 
 # Sites (Required) — the single source of truth for configured sites. JSON
 # keyed by site name; the list of sites is derived from its keys.

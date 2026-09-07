@@ -76,7 +76,7 @@ if [ $? -eq 0 ]; then
 \`\`\`
 # MongoDB Connection (Required)
 MONGODB_URL=mongodb://user:pass@mongodb-host:27017
-MONGODB_DB_NAME=segments_manager
+MONGODB_DB_NAME=segments-manager
 
 # Site Configuration (Required)
 SITE_NETWORKS='{"site1": {"pool": "192.10.0.0/16", "dell-bmc": "10.50.0.0/16", "cisco-bmc": "10.60.0.0/16"}, "site2": {"pool": "193.51.0.0/16", "dell-bmc": "10.51.0.0/16", "cisco-bmc": "10.61.0.0/16"}, "site3": {"pool": "194.52.0.0/16", "dell-bmc": "10.52.0.0/16", "cisco-bmc": "10.62.0.0/16"}}'

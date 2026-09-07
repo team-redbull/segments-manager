@@ -64,8 +64,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--uri", default=os.getenv("MONGODB_URL"),
                         help="Mongo connection string (default: $MONGODB_URL)")
-    parser.add_argument("--db", default=os.getenv("MONGODB_DB_NAME", "segments_manager"),
-                        help="database name (default: $MONGODB_DB_NAME or 'segments_manager')")
+    parser.add_argument("--db", default=os.getenv("MONGODB_DB_NAME", "segments-manager"),
+                        help="database name (default: $MONGODB_DB_NAME or 'segments-manager')")
     parser.add_argument("--collection", default="segments")
     parser.add_argument("--site-networks", default=os.getenv("SITE_NETWORKS"),
                         help="topology JSON to audit against (default: $SITE_NETWORKS). "
