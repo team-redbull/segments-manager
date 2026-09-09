@@ -21,8 +21,13 @@ class VLANConstraints:
 
 class SubnetConstraints:
     """Subnet mask constraints. Enforced by NetworkValidators.validate_subnet_mask."""
-    # /16 mirrors the widest supported site pool: a segment can at most fill its
-    # site's whole pool, so nothing larger can pass containment anyway.
+    # This range is LOAD-BEARING, not a mirror of the pool. It used to be the
+    # latter — a segment could at most fill its site's whole /16 pool, so
+    # containment already rejected anything wider. A segment admitted via
+    # SITE_NETWORKS "pool-exceptions" bypasses containment, so /16 is now the
+    # independent floor for that path; settings._parse_pool_exceptions validates
+    # listed entries against these same bounds so an unusable one cannot be
+    # configured, but this stays the enforcement point.
     MIN_PREFIX_LENGTH = 16   # /16 - Largest allowed subnet
     MAX_PREFIX_LENGTH = 31   # /31 - Smallest allowed (point-to-point, RFC 3021)
     MIN_ADDRESSES = 2        # Minimum addresses for a usable network

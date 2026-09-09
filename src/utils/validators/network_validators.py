@@ -9,7 +9,7 @@ import ipaddress
 from typing import List, Dict, Any
 from fastapi import HTTPException
 
-from ...config.settings import get_site_pool
+from ...config.settings import get_site_pool, get_site_pool_exceptions
 from ...config.constants import SubnetConstraints
 
 logger = logging.getLogger(__name__)
@@ -31,6 +31,9 @@ class NetworkValidators:
         """
         logger.debug(f"Validating segment format: '{segment}' for site '{site}'")
         pool = get_site_pool(site)
+        # Empty frozenset for an unknown site, so this is safe before the
+        # pool-is-None guard below.
+        exceptions = get_site_pool_exceptions(site)
 
         if pool is None:
             logger.error(f"No network pool configured for site '{site}'")
@@ -88,12 +91,29 @@ class NetworkValidators:
             # validate_ip_overlap then blocks every other segment at the site.
             # Both sides are guaranteed IPv4 here — the pool by startup
             # validation, the segment by the check above — so subnet_of is safe.
-            if not network.subnet_of(pool):
+            #
+            # The one documented way out is the site's `pool-exceptions` list,
+            # for a legacy network nobody wants to widen the whole pool for. The
+            # exemption is EXACT EQUALITY, never subnet_of: `network` is already
+            # canonical (strict parsing succeeded above) and IPv4Network hashes
+            # on (version, network_address, netmask), so set membership IS that
+            # rule — listing a /22 permits that /22 and none of the /24s inside
+            # it. It bypasses THIS check only; the mask, reserved-range,
+            # broadcast, overlap and uniqueness checks all still run.
+            if network in exceptions:
+                logger.info(
+                    f"Segment {segment} is outside site '{site}' pool {pool} but is "
+                    f"listed in that site's SITE_NETWORKS pool-exceptions; allowed"
+                )
+            elif not network.subnet_of(pool):
                 logger.warning(f"Segment {segment} is outside site '{site}' pool {pool}")
                 raise HTTPException(
                     status_code=400,
                     detail=f"Segment {segment} is outside site '{site}' network pool {pool}. "
-                           f"Every segment at '{site}' must fall inside {pool}."
+                           f"Every segment at '{site}' must fall inside {pool}, unless it is "
+                           f"listed verbatim in that site's \"pool-exceptions\" in "
+                           f"SITE_NETWORKS (exact CIDR match — listing a range does not "
+                           f"cover the subnets inside it)."
                 )
 
         except ValueError:
@@ -111,9 +131,13 @@ class NetworkValidators:
             # /32 is a host route, not a network
             # /8 to /15 are too large for typical allocations
             #
-            # Note this is now largely defence in depth for direct calls:
-            # validate_segment_format runs first and already rejects anything
-            # wider than the site's /16 pool.
+            # This is the real floor and ceiling, not defence in depth. It used
+            # to be the latter — validate_segment_format ran first and rejected
+            # anything wider than the site's /16 pool — but a segment admitted
+            # via that site's `pool-exceptions` is never bounded by the pool, so
+            # this check is all that constrains its mask. settings.py mirrors
+            # these bounds when parsing the list, so a dead entry cannot be
+            # configured; enforcement stays here.
             if prefix_len < SubnetConstraints.MIN_PREFIX_LENGTH or prefix_len > SubnetConstraints.MAX_PREFIX_LENGTH:
                 logger.warning(f"Unusual subnet mask: /{prefix_len}")
                 raise HTTPException(

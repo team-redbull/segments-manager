@@ -10,6 +10,9 @@ this segment" runbook will be rejected by the very rules that let the segment
 exist. Use the output to choose pools that fit reality, or to decide
 deliberately which segments to migrate.
 
+A segment listed in its site's `pool-exceptions` is NOT a violation — the
+server accepts it, so this audit must not contradict it.
+
 Pay attention to `status` in the report: an out-of-pool segment that is
 Allocated belongs to a live cluster, not just a stale row.
 
@@ -17,7 +20,8 @@ The script never writes — there is no --dry-run because there is nothing to dr
 run. It reuses src.config.settings.parse_site_networks so it can never disagree
 with the server about what a valid topology is.
 
-    SITE_NETWORKS='{"site1": {"pool": "192.10.0.0/16"}}' \
+    SITE_NETWORKS='{"site1": {"pool": "192.10.0.0/16",
+                              "pool-exceptions": ["172.20.4.0/22"]}}' \
         python scripts/audit_site_pools.py --uri mongodb://localhost:27017
 
 Exit codes: 0 clean · 1 violations found (with --fail-on-violation) · 2 bad config.
@@ -40,7 +44,7 @@ def _truthy(value: str | None) -> bool:
     return (value or "").strip().lower() in ("1", "true", "yes", "on")
 
 
-def classify(doc: dict, pools: dict, canonical: dict) -> str | None:
+def classify(doc: dict, pools: dict, exceptions: dict, canonical: dict) -> str | None:
     """Return a violation category for this document, or None if it is fine."""
     site = (doc.get("site") or "").strip()
     resolved = canonical.get(site.lower())
@@ -55,7 +59,15 @@ def classify(doc: dict, pools: dict, canonical: dict) -> str | None:
 
     pool = pools[resolved]
     # Version check first: subnet_of across families raises TypeError.
-    if network.version != pool.version or not network.subnet_of(pool):
+    if network.version != pool.version:
+        return "outside_pool"
+    # Listed verbatim in the site's pool-exceptions: the server creates it, so
+    # reporting it here would put this audit permanently at odds with the
+    # service it exists to predict. Exact equality, matching that rule. A stored
+    # CIDR with host bits normalises above, so it still matches a listed entry.
+    if network in exceptions.get(resolved, frozenset()):
+        return None
+    if not network.subnet_of(pool):
         return "outside_pool"
     return None
 
@@ -85,7 +97,7 @@ def main() -> int:
     os.environ.setdefault("MONGODB_URL", args.uri)
     from src.config.settings import parse_site_networks
 
-    networks, pools, errors = parse_site_networks(args.site_networks)
+    networks, pools, exceptions, errors = parse_site_networks(args.site_networks)
     if errors:
         print("SITE_NETWORKS is invalid:", file=sys.stderr)
         for error in errors:
@@ -113,7 +125,7 @@ def main() -> int:
         if resolved:
             per_site[resolved]["total"] += 1
 
-        category = classify(doc, pools, canonical)
+        category = classify(doc, pools, exceptions, canonical)
         if category is None:
             per_site[resolved]["ok"] += 1
             continue
@@ -139,9 +151,12 @@ def main() -> int:
               f"collection={args.collection!r}\n")
         for site, pool in pools.items():
             counts = per_site[site]
+            listed = exceptions.get(site) or frozenset()
             print(f"  {site:12s} pool={str(pool):20s} "
                   f"total={counts['total']:<5d} ok={counts['ok']:<5d} "
-                  f"violations={counts['total'] - counts['ok']}")
+                  f"violations={counts['total'] - counts['ok']}"
+                  + (f"  (+{len(listed)} pool-exception(s): "
+                     + ", ".join(sorted(str(n) for n in listed)) + ")" if listed else ""))
 
         if violations:
             print(f"\n{'CATEGORY':<20} {'SEGMENT':<20} {'SITE':<10} {'TYPE':<10} "

@@ -80,6 +80,7 @@
                 <li><strong>site2</strong> — segments must be inside <code>193.51.0.0/16</code></li>
                 <li><strong>site3</strong> — segments must be inside <code>194.52.0.0/16</code></li>
             </ul>
+            <p>A site may additionally accept specific networks from outside its pool. These are enumerated one by one by an administrator (<code>pool-exceptions</code> in the server configuration) and matched exactly — a listed range does not cover the smaller subnets inside it.</p>
 
             <h3>Segment types</h3>
             <p>Every segment has a <code>type</code>, one of <code>MCE</code>, <code>INVENTORY</code>, <code>HC</code>, <code>PXE</code>. Optional — defaults to <code>HC</code> if omitted when creating a segment.</p>
@@ -347,6 +348,7 @@ curl "http://localhost:8000/api/segments/search?q=cluster&site=site1&allocated=t
             <h4>Segment outside the site's pool</h4>
             <p><strong>Error:</strong> "Segment X is outside site Y network pool Z"</p>
             <p><strong>Solution:</strong> Every segment must fall entirely inside its site's pool — site1: <code>192.10.0.0/16</code>, site2: <code>193.51.0.0/16</code>, site3: <code>194.52.0.0/16</code>. The error names the expected pool; pick a subnet inside it.</p>
+            <p>If this is a legitimate legacy network that cannot be moved into the pool, an administrator can add its exact CIDR to that site's <code>pool-exceptions</code> in <code>SITE_NETWORKS</code> and restart the server. It must be listed verbatim — listing a wider range does not cover the subnets inside it.</p>
 
             <h4>No available segments</h4>
             <p><strong>Error:</strong> "No available segments"</p>

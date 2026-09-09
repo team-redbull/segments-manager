@@ -17,7 +17,8 @@ from concurrent.futures import ThreadPoolExecutor
 
 import requests
 
-from conftest import API, AUTH_HEADERS, TIMEOUT, next_vlan, cidr_for
+from conftest import (API, AUTH_HEADERS, TIMEOUT, next_vlan, cidr_for,
+                      SITE_POOL_EXCEPTION)
 
 
 def _uid(prefix="EPG"):
@@ -111,6 +112,34 @@ class TestSegmentValidation:
                             segment="192.99.0.0/24")
         assert r.status_code == 400
         assert "outside site" in r.json()["detail"]
+
+    def test_subnet_of_a_listed_exception_is_still_rejected(self, segment_factory):
+        """`pool-exceptions` is exact-match, not subnet_of: one listed /22 must
+        not quietly authorise the four /24s inside it.
+
+        Ordered before the test that creates the /22 so a leaked one from an
+        earlier session cannot turn this into an overlap failure — though
+        containment runs before the overlap check either way, which is why the
+        detail is asserted too.
+        """
+        r = segment_factory(site="site1", vlan_id=next_vlan(), epg_name=_uid(),
+                            segment="172.20.5.0/24")
+        assert r.status_code == 400, r.text
+        assert "outside site" in r.json()["detail"]
+
+    def test_exception_does_not_travel_to_another_site(self, segment_factory):
+        """The list is per-site: site1's exemption says nothing about site2."""
+        r = segment_factory(site="site2", vlan_id=next_vlan(), epg_name=_uid(),
+                            segment=SITE_POOL_EXCEPTION["site1"])
+        assert r.status_code == 400, r.text
+        assert "outside site" in r.json()["detail"]
+
+    def test_listed_out_of_pool_segment_is_accepted(self, segment_factory):
+        """The escape hatch itself: a CIDR outside site1's /16 pool is created
+        because it is listed verbatim in that site's pool-exceptions."""
+        r = segment_factory(site="site1", vlan_id=next_vlan(), epg_name=_uid(),
+                            segment=SITE_POOL_EXCEPTION["site1"])
+        assert r.status_code == 200, r.text
 
     def test_ipv6_segment_rejected(self, segment_factory):
         """`segment` is an unvalidated string on the request model, so an IPv6

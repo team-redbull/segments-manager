@@ -36,8 +36,23 @@ _SCRIPT = (
     "print('STARTED', s.SITES)"
 )
 
+# Asserts the pool-exceptions rule at the parse layer, with no server and no
+# HTTP: exact CIDR equality, and nothing else the listed range contains.
+_EXACT_MATCH_SCRIPT = (
+    "import ipaddress; import src.config.settings as s; "
+    "s.validate_site_networks(); "
+    "listed = s.SITE_POOL_EXCEPTIONS['site1']; "
+    "assert listed == frozenset({ipaddress.ip_network('172.20.4.0/22')}), listed; "
+    "assert ipaddress.ip_network('172.20.5.0/24') not in listed; "
+    "assert ipaddress.ip_network('172.20.0.0/16') not in listed; "
+    "assert s.get_site_pool_exceptions('SITE1') == listed; "
+    "assert s.get_site_pool_exceptions('site2') == frozenset(); "
+    "assert s.get_site_pool_exceptions('nope') == frozenset(); "
+    "print('EXACT-MATCH-OK')"
+)
 
-def run_startup(site_networks=None, site_prefixes=None):
+
+def run_startup(site_networks=None, site_prefixes=None, script=_SCRIPT):
     """Import settings and validate under a controlled environment.
 
     Returns the CompletedProcess; returncode 0 means the app would have started.
@@ -52,7 +67,7 @@ def run_startup(site_networks=None, site_prefixes=None):
     }
 
     return subprocess.run(
-        [sys.executable, "-c", _SCRIPT],
+        [sys.executable, "-c", script],
         cwd=REPO_ROOT, env=env, capture_output=True, text=True, timeout=60,
     )
 
@@ -96,6 +111,137 @@ class TestValidConfig:
         assert r.returncode == 0, r.stderr
         assert "unrecognised" in r.stderr
         assert "bmc" in r.stderr
+
+
+# A /22 that clears every pool (192.10/193.51/194.52) and every BMC range
+# (10.5x/10.6x), so it is exempt-able without tripping any startup check.
+EXCEPTION = "172.20.4.0/22"
+
+
+def _with_exceptions(*cidrs, site="site1"):
+    """VALID, with `site` carrying the given pool-exceptions list."""
+    cfg = {name: dict(net) for name, net in VALID.items()}
+    cfg[site]["pool-exceptions"] = list(cidrs)
+    return cfg
+
+
+class TestPoolExceptions:
+    """`pool-exceptions`: the per-site escape hatch for an out-of-pool network.
+
+    The alternative it exists to avoid is widening the site's /16 pool, which
+    loosens containment for every future segment in order to admit one legacy
+    one. See NetworkValidators.validate_segment_format.
+    """
+
+    def test_valid_exception_starts(self):
+        r = run_startup(json.dumps(_with_exceptions(EXCEPTION)))
+        assert r.returncode == 0, r.stderr
+        assert "STARTED" in r.stdout
+
+    def test_the_key_is_not_reported_unrecognised(self):
+        """This service OWNS the key. If it ever lands in the unknown-sub-key
+        INFO log, the set in validate_site_networks has drifted."""
+        r = run_startup(json.dumps(_with_exceptions(EXCEPTION)))
+        assert r.returncode == 0, r.stderr
+        assert "unrecognised" not in r.stderr
+
+    def test_exceptions_are_named_in_the_startup_summary(self):
+        """An out-of-pool segment is only creatable because of this list, so the
+        startup log must say so without anyone opening the ConfigMap."""
+        r = run_startup(json.dumps(_with_exceptions(EXCEPTION)))
+        assert r.returncode == 0, r.stderr
+        assert EXCEPTION in r.stderr
+        assert "pool-exception" in r.stderr
+
+    def test_exemption_is_exact_cidr_equality(self):
+        """The rule that keeps one entry from opening the whole listed range:
+        a listed /22 must not authorise the /24s inside it."""
+        r = run_startup(json.dumps(_with_exceptions(EXCEPTION)),
+                        script=_EXACT_MATCH_SCRIPT)
+        assert r.returncode == 0, r.stderr
+        assert "EXACT-MATCH-OK" in r.stdout
+
+    def test_empty_list_is_a_no_op(self):
+        r = run_startup(json.dumps(_with_exceptions()))
+        assert r.returncode == 0, r.stderr
+
+    def test_absent_key_is_a_no_op(self):
+        """Regression guard: every site gets an entry in the exceptions map,
+        so nothing downstream needs a default."""
+        r = run_startup(json.dumps(VALID))
+        assert r.returncode == 0, r.stderr
+        assert "pool-exception" not in r.stderr
+
+
+class TestInvalidPoolExceptions:
+    """Every case here is a config that would otherwise be silently DEAD — the
+    entry looks configured but no segment matching it could ever be created."""
+
+    def test_non_list_refuses(self):
+        cfg = dict(VALID)
+        cfg["site1"] = dict(cfg["site1"], **{"pool-exceptions": EXCEPTION})
+        assert_refused(run_startup(json.dumps(cfg)), "must be a JSON list")
+
+    @pytest.mark.parametrize("cidr", ["172.20.4.1/22", "not-a-cidr", "172.20.4.0/33"])
+    def test_bad_exception_cidr_refuses(self, cidr):
+        assert_refused(run_startup(json.dumps(_with_exceptions(cidr))),
+                       "invalid pool-exceptions[0] CIDR")
+
+    def test_ipv6_exception_refuses(self):
+        assert_refused(run_startup(json.dumps(_with_exceptions("2001:db8::/48"))),
+                       "must be IPv4")
+
+    @pytest.mark.parametrize("cidr", ["172.0.0.0/8", "172.20.4.1/32"])
+    def test_exception_outside_the_supported_mask_range_refuses(self, cidr):
+        """validate_subnet_mask would reject it forever — refuse it up front."""
+        assert_refused(run_startup(json.dumps(_with_exceptions(cidr))),
+                       "outside the supported /16-/31 range")
+
+    @pytest.mark.parametrize("cidr", ["127.0.0.0/22", "169.254.0.0/22", "224.0.0.0/22"])
+    def test_reserved_range_exception_refuses(self, cidr):
+        """Same reasoning, for validate_no_reserved_ips."""
+        assert_refused(run_startup(json.dumps(_with_exceptions(cidr))),
+                       "the entry would be dead")
+
+    def test_duplicate_exception_refuses(self):
+        assert_refused(run_startup(json.dumps(_with_exceptions(EXCEPTION, EXCEPTION))),
+                       "is listed twice")
+
+    def test_exception_inside_its_own_pool_refuses(self):
+        """Containment already admits it, so the entry exempts nothing. A
+        silently redundant entry is how an operator comes to believe a range is
+        exempted when the permission really came from a pool they later narrow."""
+        assert_refused(run_startup(json.dumps(_with_exceptions("192.10.5.0/24"))),
+                       "overlaps that site's own pool")
+
+    def test_exception_overlapping_another_sites_pool_refuses(self):
+        """validate_ip_overlap is global, so a segment created under this
+        exemption would permanently block a range site2 legitimately owns."""
+        assert_refused(run_startup(json.dumps(_with_exceptions("193.51.5.0/24"))),
+                       "overlaps site 'site2' pool")
+
+    @pytest.mark.parametrize("bmc_key", ["dell-bmc", "cisco-bmc"])
+    def test_exception_overlapping_a_bmc_network_refuses(self, bmc_key):
+        """The invariant this whole feature puts at risk. Containment used to
+        guarantee no segment could reach a BMC network; an exception bypasses
+        containment, so startup is the ONLY thing left that can catch it."""
+        cfg = _with_exceptions("10.50.4.0/22")
+        cfg["site2"][bmc_key] = "10.50.0.0/16"
+        assert_refused(run_startup(json.dumps(cfg)), f"{bmc_key} BMC network")
+
+    def test_exceptions_overlapping_each_other_refuse(self):
+        cfg = _with_exceptions(EXCEPTION)
+        cfg["site2"]["pool-exceptions"] = ["172.20.5.0/24"]
+        assert_refused(run_startup(json.dumps(cfg)),
+                       "overlaps site 'site2' pool-exceptions entry")
+
+    def test_a_bad_pool_and_a_bad_exception_are_both_reported(self):
+        """parse_site_networks collects every fault so one restart shows them
+        all — exceptions are parsed even when that site's pool did not."""
+        cfg = {"site1": {"pool": "not-a-cidr", "pool-exceptions": ["also-not-a-cidr"]}}
+        assert_refused(run_startup(json.dumps(cfg)),
+                       "invalid pool CIDR",
+                       "invalid pool-exceptions[0] CIDR")
 
 
 class TestLegacyVar:

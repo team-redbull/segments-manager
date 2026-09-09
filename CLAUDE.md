@@ -47,7 +47,7 @@ python main.py            # serves http://localhost:8000
 ```bash
 MONGODB_URL="mongodb://localhost:27017"          # or mongodb+srv://... for Atlas — REQUIRED (fail-fast if unset)
 MONGODB_DB_NAME="segments-manager"                    # optional, default: segments-manager
-SITE_NETWORKS='{"site1": {"pool": "192.10.0.0/16", "dell-bmc": "10.50.0.0/16", "cisco-bmc": "10.60.0.0/16"}, "site2": {"pool": "193.51.0.0/16", "dell-bmc": "10.51.0.0/16", "cisco-bmc": "10.61.0.0/16"}, "site3": {"pool": "194.52.0.0/16", "dell-bmc": "10.52.0.0/16", "cisco-bmc": "10.62.0.0/16"}}'  # REQUIRED. JSON site topology; the single source of truth for
+SITE_NETWORKS='{"site1": {"pool": "192.10.0.0/16", "pool-exceptions": ["172.20.4.0/22"], "dell-bmc": "10.50.0.0/16", "cisco-bmc": "10.60.0.0/16"}, "site2": {"pool": "193.51.0.0/16", "dell-bmc": "10.51.0.0/16", "cisco-bmc": "10.61.0.0/16"}, "site3": {"pool": "194.52.0.0/16", "dell-bmc": "10.52.0.0/16", "cisco-bmc": "10.62.0.0/16"}}'  # REQUIRED. JSON site topology; the single source of truth for
                                                     # configured sites; SITES is derived from its keys (no separate var)
 API_TOKEN="<long-random-secret>"                   # REQUIRED (fail-fast) — Bearer token for write requests
 ```
@@ -68,7 +68,7 @@ SEGMENTS_MANAGER_URL=http://host:8000 pytest tests/ -v # target elsewhere
 ```
 
 The server under test must be configured with
-`SITE_NETWORKS='{"site1": {"pool": "192.10.0.0/16", "dell-bmc": "10.50.0.0/16", "cisco-bmc": "10.60.0.0/16"}, "site2": {"pool": "193.51.0.0/16", "dell-bmc": "10.51.0.0/16", "cisco-bmc": "10.61.0.0/16"}, "site3": {"pool": "194.52.0.0/16", "dell-bmc": "10.52.0.0/16", "cisco-bmc": "10.62.0.0/16"}}'`. To test the container image, run a
+`SITE_NETWORKS='{"site1": {"pool": "192.10.0.0/16", "pool-exceptions": ["172.20.4.0/22"], "dell-bmc": "10.50.0.0/16", "cisco-bmc": "10.60.0.0/16"}, "site2": {"pool": "193.51.0.0/16", "dell-bmc": "10.51.0.0/16", "cisco-bmc": "10.61.0.0/16"}, "site3": {"pool": "194.52.0.0/16", "dell-bmc": "10.52.0.0/16", "cisco-bmc": "10.62.0.0/16"}}'`. To test the container image, run a
 throwaway MongoDB + the image on a shared podman network (see `tests/README.md`).
 
 ### Container Deployment (Podman)
@@ -113,7 +113,7 @@ Chart in `deploy/helm/`. Set `mongodb.url` (stored in a generated Secret) or poi
 3. **Async throughout** — all I/O is `async`/`await` on Motor.
 4. **Atomic allocation** — `allocate_segment()` uses `find_one_and_update(..., return_document=AFTER)` so concurrent callers can never receive the same segment.
 5. **Short in-memory cache** — the full segments list is cached (60s TTL) with in-flight request de-duplication (`src/database/cache.py`); invalidated on every write.
-6. **Fail-fast config** — missing `MONGODB_URL`, missing `API_TOKEN`, or an invalid `SITE_NETWORKS` crashes at startup. Invalid covers: unset, unparseable, a site with no `pool`, a non-strict or non-IPv4 CIDR, sites differing only by case, and pools that overlap each other or a BMC network. Setting the superseded `SITE_PREFIXES` while `SITE_NETWORKS` is unset also aborts — that combination means new code against a stale ConfigMap.
+6. **Fail-fast config** — missing `MONGODB_URL`, missing `API_TOKEN`, or an invalid `SITE_NETWORKS` crashes at startup. Invalid covers: unset, unparseable, a site with no `pool`, a non-strict or non-IPv4 CIDR, sites differing only by case, pools that overlap each other or a BMC network, and a `pool-exceptions` that is not a list, or one holding a bad, non-IPv4, non-strict or duplicated CIDR, a mask outside /16–/31, a reserved range, or an entry overlapping any pool, BMC network or other exception. Setting the superseded `SITE_PREFIXES` while `SITE_NETWORKS` is unset also aborts — that combination means new code against a stale ConfigMap.
 7. **No outbound calls** — this service talks to MongoDB and nothing else. The segment-connectivity orchestrator calls *in* (create, publish request ids, unlock); it is never called *from* here.
 
 ---
@@ -232,7 +232,7 @@ Return VLANAllocationResponse
 Defense-in-depth in `src/utils/validators/`:
 
 - **input_validators.py** — site (must be in `SITES`), VLAN ID (1–4094), EPG name (≤64 chars, safe charset), cluster name.
-- **network_validators.py** — CIDR format & strict network address, **site pool containment** (`get_site_pool(site)`, `network.subnet_of(pool)`), subnet mask /16–/31, reserved-range rejection, overlap detection.
+- **network_validators.py** — CIDR format & strict network address, **site pool containment** (`get_site_pool(site)`, `network.subnet_of(pool)`) with the exact-match `pool-exceptions` escape hatch (`get_site_pool_exceptions(site)`, `network in exceptions`), subnet mask /16–/31, reserved-range rejection, overlap detection.
 - **organization_validators.py** — allocation state (can't delete allocated), **EPG-name uniqueness per site**.
 
 VLAN uniqueness is enforced both at the app level (`check_vlan_exists(site, vlan_id)`) and by the Mongo unique index.
@@ -260,7 +260,7 @@ VLAN uniqueness is enforced both at the app level (`check_vlan_exists(site, vlan
 5. **Async throughout** — everything touching the DB is `async`.
 6. **Invalidate cache on writes** — call `invalidate_cache(CACHE_KEY_SEGMENTS)` after modifications (the Mongo write functions already do this).
 7. **Wrap service methods** with `@handle_db_errors` + `@retry_on_network_error` + `@log_operation_timing` (or the combined `@db_operation`).
-8. **Site pool containment** is a core validation rule: every segment must be a subnet of its site's configured `pool` (e.g. site1 ⇒ inside `192.10.0.0/16`). A segment equal to the whole pool is permitted.
+8. **Site pool containment** is a core validation rule: every segment must be a subnet of its site's configured `pool` (e.g. site1 ⇒ inside `192.10.0.0/16`). A segment equal to the whole pool is permitted. The ONE documented exemption is `pool-exceptions`, an optional per-site list inside `SITE_NETWORKS` naming out-of-pool CIDRs to accept — the alternative being to widen the pool, which loosens containment for every future segment to admit one legacy network. It is **exact CIDR equality, never `subnet_of`**: listing `172.20.4.0/22` permits that `/22` and none of the `/24`s inside it. It bypasses containment ALONE — mask range, reserved ranges, broadcast, overlap and vlan/name uniqueness all still run. Because it is the only way a segment can now escape its pool, `settings._find_overlaps` rejects at startup any entry overlapping a pool, a BMC network or another entry; that check is what used to come free from containment.
 9. **The segment CIDR is the API identifier** — single-segment endpoints are keyed by `segment` (query param for GET/DELETE, body field for writes), never by ObjectId. `_id` stays internal (str on the way out, resolved via CIDR lookup on the way in).
 
 ---

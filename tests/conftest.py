@@ -10,6 +10,7 @@ container image). Configure the target with environment variables:
 
 The suite assumes the server is configured with:
     SITE_NETWORKS={"site1": {"pool": "192.10.0.0/16",
+                             "pool-exceptions": ["172.20.4.0/22"],
                              "dell-bmc": "10.50.0.0/16", "cisco-bmc": "10.60.0.0/16"},
                    "site2": {"pool": "193.51.0.0/16",
                              "dell-bmc": "10.51.0.0/16", "cisco-bmc": "10.61.0.0/16"},
@@ -37,6 +38,16 @@ SITE_POOL = {
     "site1": "192.10.0.0/16",
     "site2": "193.51.0.0/16",
     "site3": "194.52.0.0/16",
+}
+
+# Out-of-pool CIDRs the server accepts because they are listed verbatim in that
+# site's SITE_NETWORKS "pool-exceptions" (site1 only, so the per-site scoping is
+# testable). Unlike cidr_for() below, this is ONE FIXED CIDR shared by every
+# run: a session whose segment_factory teardown dies leaves it in Mongo, and the
+# next run then fails on OVERLAP rather than on the pool. Tests assert on the
+# response detail as well as the status so that is obvious when it happens.
+SITE_POOL_EXCEPTION = {
+    "site1": "172.20.4.0/22",
 }
 
 # Randomized, monotonic VLAN IDs in a high band to avoid colliding with

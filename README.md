@@ -99,6 +99,11 @@ MONGODB_DB_NAME=segments-manager                 # optional (default: segments-m
 # Sites (Required) — the single source of truth for configured sites. JSON
 # keyed by site name; the list of sites is derived from its keys.
 #   pool  the CIDR every segment at that site must fall INSIDE
+#   pool-exceptions  optional list of CIDRs accepted at that site DESPITE being
+#         outside `pool` — the escape hatch for a legacy network, so one does
+#         not have to widen the pool for every future segment. Exact CIDR match:
+#         listing a /22 permits that /22, not the /24s inside it. Bypasses the
+#         containment check only.
 #   dell-bmc   the site's out-of-band management networks, one per server
 #   cisco-bmc  hardware vendor. Optional, never read per-request; used only at
 #              startup to verify no pool collides with either.
@@ -111,7 +116,7 @@ SERVER_PORT=8000
 API_TOKEN=change-me-to-a-long-random-secret   # REQUIRED — the only credential for write requests
 ```
 
-**Fail-fast validation**: the app crashes at startup if `MONGODB_URL` or `API_TOKEN` is unset, or if `SITE_NETWORKS` is missing, malformed, has a site without a `pool`, or defines pools that overlap each other or a BMC network. It also refuses to start if the superseded `SITE_PREFIXES` is set while `SITE_NETWORKS` is not — that combination means new code against a stale config.
+**Fail-fast validation**: the app crashes at startup if `MONGODB_URL` or `API_TOKEN` is unset, or if `SITE_NETWORKS` is missing, malformed, has a site without a `pool`, or defines pools that overlap each other or a BMC network. Invalid also covers a `pool-exceptions` that is not a list, or one holding a bad, non-IPv4, non-strict or duplicated CIDR, a mask outside /16–/31, a reserved range, or an entry overlapping any pool, BMC network or other exception — every one of those would be an entry no segment could ever match. It also refuses to start if the superseded `SITE_PREFIXES` is set while `SITE_NETWORKS` is not — that combination means new code against a stale config.
 
 ---
 

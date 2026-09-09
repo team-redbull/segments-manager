@@ -7,6 +7,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from .constants import SubnetConstraints
+
 # Load .env for local development. Existing environment variables always take
 # precedence (load_dotenv never overrides them), so container/Helm deployments
 # that inject real env vars are unaffected. This module is the first project
@@ -57,6 +59,18 @@ if not MONGODB_URL:
 #
 #   pool       the /16 (or narrower) every segment at that site must fall INSIDE.
 #              Read on every create — see NetworkValidators.validate_segment_format.
+#   pool-exceptions
+#              OPTIONAL list of CIDRs at that site that are accepted even though
+#              they fall OUTSIDE `pool`. The escape hatch for a legacy network
+#              nobody wants to widen the pool for — widening loosens the rule for
+#              every future segment to accommodate one. Matching is EXACT CIDR
+#              EQUALITY: listing "172.20.4.0/22" permits that /22 and nothing
+#              else, so one entry can never silently authorise the /24s inside
+#              it. It bypasses CONTAINMENT ONLY — mask range, reserved ranges,
+#              network/broadcast, overlap and vlan/name uniqueness all still run.
+#              Startup rejects an entry that overlaps any pool, any BMC network
+#              or another entry (see _find_overlaps), and any entry that could
+#              never be created anyway (see _parse_pool_exceptions).
 #   dell-bmc   the site's static out-of-band management networks, ONE PER SERVER
 #   cisco-bmc  HARDWARE VENDOR — Dell and Cisco BMCs sit on separate /16s. This
 #              service never reads them per-request; they exist here only so
@@ -76,6 +90,7 @@ SITE_NETWORKS_ENV = os.getenv("SITE_NETWORKS", "")
 _LEGACY_SITE_PREFIXES_ENV = os.getenv("SITE_PREFIXES", "")
 
 _BMC_KEYS = ("dell-bmc", "cisco-bmc")
+_POOL_EXCEPTIONS_KEY = "pool-exceptions"
 
 _SITE_NETWORKS_EXAMPLE = (
     'SITE_NETWORKS=\'{"site1": {"pool": "192.10.0.0/16", '
@@ -88,23 +103,28 @@ _SITE_NETWORKS_EXAMPLE = (
 def parse_site_networks(raw: str):
     """Parse and validate the SITE_NETWORKS JSON topology.
 
-    Returns (networks, pools, errors). Never raises — every problem is appended
-    to `errors` so startup can report all of them at once. The raise happens in
-    validate_site_networks(), not at import: src/app.py already has a
+    Returns (networks, pools, exceptions, errors). Never raises — every problem
+    is appended to `errors` so startup can report all of them at once. The raise
+    happens in validate_site_networks(), not at import: src/app.py already has a
     validate-then-log lifespan, and raising here would make this module
     un-importable (breaking tests and any tooling that reads settings).
 
-    networks  {site: {sub-key: raw value}} — the untouched parsed JSON per site
-    pools     {site: IPv4Network} — parsed once here so request validation does
-              no re-parsing
+    networks    {site: {sub-key: raw value}} — the untouched parsed JSON per site
+    pools       {site: IPv4Network} — parsed once here so request validation does
+                no re-parsing
+    exceptions  {site: frozenset[IPv4Network]} — that site's out-of-pool
+                exemptions, parsed once here for the same reason. Present for
+                every site in `networks`, empty when the key is absent, so no
+                caller needs a default.
     """
     networks: dict = {}
     pools: dict = {}
+    exceptions: dict = {}
     errors: list = []
 
     if not raw.strip():
         errors.append("SITE_NETWORKS is not set")
-        return networks, pools, errors
+        return networks, pools, exceptions, errors
 
     try:
         parsed = json.loads(raw)
@@ -117,11 +137,11 @@ def parse_site_networks(raw: str):
                 "the value looks like the legacy SITE_PREFIXES format "
                 '("site1:192,site2:193"). It was replaced by the JSON topology below.'
             )
-        return networks, pools, errors
+        return networks, pools, exceptions, errors
 
     if not isinstance(parsed, dict) or not parsed:
         errors.append("SITE_NETWORKS must be a non-empty JSON object keyed by site name")
-        return networks, pools, errors
+        return networks, pools, exceptions, errors
 
     seen_lower: dict = {}
     for site, value in parsed.items():
@@ -160,10 +180,14 @@ def parse_site_networks(raw: str):
             if bmc_key in value:
                 _parse_cidr(site, bmc_key, value[bmc_key], errors)
 
+        # Parsed even when `pool` above failed, so a config that is wrong in both
+        # places reports both faults in one run — the promise in the docstring.
+        exceptions[site] = _parse_pool_exceptions(site, value, errors)
+
         networks[site] = value
 
-    errors.extend(_find_overlaps(parsed, pools))
-    return networks, pools, errors
+    errors.extend(_find_overlaps(parsed, pools, exceptions))
+    return networks, pools, exceptions, errors
 
 
 def _parse_cidr(site: str, key: str, value, errors: list):
@@ -183,21 +207,125 @@ def _parse_cidr(site: str, key: str, value, errors: list):
     return network
 
 
-def _find_overlaps(parsed: dict, pools: dict) -> list:
-    """Check that no pool overlaps another pool or any site's BMC networks.
+def _sorted_networks(networks):
+    """Networks in address order, so every message and log line is stable."""
+    return sorted(networks, key=lambda n: (int(n.network_address), n.prefixlen))
+
+
+def _reserved_range_reason(network):
+    """Name the reserved range `network` sits in, or None if it is usable.
+
+    A deliberate mirror of NetworkValidators.validate_no_reserved_ips, which is
+    the authority — settings.py cannot import it (network_validators.py imports
+    THIS module, so the dependency only goes one way). Duplicated here for one
+    reason only: to reject a pool-exceptions entry that could never be created,
+    at startup rather than as a mystifying 400 months later. Keep the two in
+    step; the request path stays the enforcement point.
+    """
+    first_octet = int(str(network.network_address).split(".")[0])
+    if first_octet == 0:
+        return "0.0.0.0/8 (current network identifier)"
+    if first_octet == 127:
+        return "127.0.0.0/8 (loopback)"
+    if first_octet == 169 and str(network.network_address).startswith("169.254"):
+        return "169.254.0.0/16 (link-local)"
+    if first_octet >= 224:
+        return f"{first_octet}.0.0.0/8 (multicast/reserved)"
+    return None
+
+
+def _parse_pool_exceptions(site: str, value: dict, errors: list):
+    """Parse one site's `pool-exceptions` into a frozenset of exact networks.
+
+    Membership is tested with `in` at request time, and IPv4Network hashes on
+    (version, network_address, netmask) — so set membership IS the exact-equality
+    rule the key promises, with no string comparison and no subnet_of.
+
+    Everything that would make an entry DEAD is an error here rather than a
+    surprise 400 long after the config was reviewed: a mask outside
+    SubnetConstraints or a reserved range would be rejected by
+    validate_subnet_mask / validate_no_reserved_ips no matter what this list
+    says, and a duplicate states the same exemption twice.
+    """
+    raw = value.get(_POOL_EXCEPTIONS_KEY)
+    if raw is None:
+        return frozenset()
+    if not isinstance(raw, list):
+        errors.append(
+            f"site '{site}': \"{_POOL_EXCEPTIONS_KEY}\" must be a JSON list of CIDR "
+            f"strings, got a {type(raw).__name__}"
+        )
+        return frozenset()
+
+    parsed: set = set()
+    for index, entry in enumerate(raw):
+        # strict=True and the IPv4 check come free with _parse_cidr, and the
+        # indexed label points at the offending element rather than the list.
+        label = f"{_POOL_EXCEPTIONS_KEY}[{index}]"
+        network = _parse_cidr(site, label, entry, errors)
+        if network is None:
+            continue
+
+        if not (SubnetConstraints.MIN_PREFIX_LENGTH
+                <= network.prefixlen <= SubnetConstraints.MAX_PREFIX_LENGTH):
+            errors.append(
+                f"site '{site}': {label} {network} is a /{network.prefixlen}, outside "
+                f"the supported /{SubnetConstraints.MIN_PREFIX_LENGTH}"
+                f"-/{SubnetConstraints.MAX_PREFIX_LENGTH} range — no segment with this "
+                f"mask can be created, so the entry would be dead"
+            )
+            continue
+
+        reserved = _reserved_range_reason(network)
+        if reserved is not None:
+            errors.append(
+                f"site '{site}': {label} {network} is in {reserved}, which is rejected "
+                f"for every segment — the entry would be dead"
+            )
+            continue
+
+        if network in parsed:
+            errors.append(f"site '{site}': {label} {network} is listed twice")
+            continue
+        parsed.add(network)
+
+    return frozenset(parsed)
+
+
+def _iter_bmc_networks(parsed: dict):
+    """Yield (site, key, IPv4Network) for every parseable BMC network."""
+    for site, value in parsed.items():
+        if not isinstance(value, dict):
+            continue
+        for bmc_key in _BMC_KEYS:
+            if bmc_key not in value:
+                continue
+            try:
+                yield site, bmc_key, ipaddress.ip_network(value[bmc_key], strict=True)
+            except (ValueError, TypeError):
+                continue  # already reported by _parse_cidr
+
+
+def _find_overlaps(parsed: dict, pools: dict, exceptions: dict) -> list:
+    """Check that no pool or pool-exception collides with another, or with a BMC network.
 
     Two overlapping pools would make site containment ambiguous. A pool
     overlapping a BMC network means segments would be allocated on top of an
-    out-of-band management network. Neither is detectable anywhere else: request
-    validation checks containment first, and pools are disjoint from the BMC
-    ranges by design, so no segment that passes containment can ever reach a BMC
-    conflict. Startup is the only place these can be caught.
+    out-of-band management network. Neither is detectable anywhere else, and
+    startup is the only place they can be caught.
+
+    That used to hold because containment bounded every segment. It no longer
+    does: a request is admitted by containment OR by an exact match against the
+    site's `pool-exceptions`, and the exception path bypasses containment
+    entirely. So a mistyped exception is the ONE way a segment can now land on a
+    BMC network or inside a range another site owns, and the four exception
+    checks below are the only thing standing in front of it.
 
     Every vendor's BMC network is checked, not just one: a site has a Dell and a
-    Cisco management /16, and a pool colliding with either is the same fault.
-    Deliberately NOT checked: BMC-vs-BMC overlap. This service owns `pool`, and
-    inventing invariants over keys it never reads is how the two services'
-    validation drifts apart.
+    Cisco management /16, and colliding with either is the same fault.
+    Deliberately NOT checked: BMC-vs-BMC overlap. This service owns `pool` and
+    `pool-exceptions`, and inventing invariants over keys it never reads is how
+    the two services' validation drifts apart.
     """
     errors = []
     sites = list(pools)
@@ -210,26 +338,70 @@ def _find_overlaps(parsed: dict, pools: dict) -> list:
                     f"site '{site_b}' pool {pools[site_b]}"
                 )
 
-    for bmc_site, value in parsed.items():
-        if not isinstance(value, dict):
-            continue
-        for bmc_key in _BMC_KEYS:
-            if bmc_key not in value:
-                continue
-            try:
-                bmc = ipaddress.ip_network(value[bmc_key], strict=True)
-            except (ValueError, TypeError):
-                continue  # already reported by _parse_cidr
-            for pool_site, pool in pools.items():
-                if pool.overlaps(bmc):
+    bmc_networks = list(_iter_bmc_networks(parsed))
+
+    for bmc_site, bmc_key, bmc in bmc_networks:
+        for pool_site, pool in pools.items():
+            if pool.overlaps(bmc):
+                errors.append(
+                    f"site '{pool_site}' pool {pool} overlaps site "
+                    f"'{bmc_site}' {bmc_key} BMC network {bmc}"
+                )
+
+    for site in sorted(exceptions):
+        for exception in _sorted_networks(exceptions[site]):
+            # Its own pool: containment already admits anything in there, so the
+            # entry exempts nothing. It is still an error, not a warning — a
+            # silently redundant entry is how an operator comes to believe a
+            # range is exempted when the real permission came from a pool they
+            # may later narrow. overlaps() rather than subnet_of() so an entry
+            # merely straddling the pool edge is caught as the same mistake.
+            own_pool = pools.get(site)
+            if own_pool is not None and exception.overlaps(own_pool):
+                errors.append(
+                    f"site '{site}' {_POOL_EXCEPTIONS_KEY} entry {exception} overlaps "
+                    f"that site's own pool {own_pool} — segments inside the pool are "
+                    f"already allowed; remove the entry"
+                )
+
+            # Another site's pool: validate_ip_overlap is GLOBAL, so a segment
+            # created under this exemption would permanently block a range the
+            # other site legitimately owns.
+            for other_site, other_pool in pools.items():
+                if other_site != site and exception.overlaps(other_pool):
                     errors.append(
-                        f"site '{pool_site}' pool {pool} overlaps site "
-                        f"'{bmc_site}' {bmc_key} BMC network {bmc}"
+                        f"site '{site}' {_POOL_EXCEPTIONS_KEY} entry {exception} "
+                        f"overlaps site '{other_site}' pool {other_pool}"
                     )
+
+            # Any site's BMC network — the exact fault the pool loop above
+            # exists to prevent, now reachable because containment is bypassed.
+            for bmc_site, bmc_key, bmc in bmc_networks:
+                if exception.overlaps(bmc):
+                    errors.append(
+                        f"site '{site}' {_POOL_EXCEPTIONS_KEY} entry {exception} "
+                        f"overlaps site '{bmc_site}' {bmc_key} BMC network {bmc}"
+                    )
+
+    # Exception vs exception. Exact duplicates within one site are caught in
+    # _parse_pool_exceptions; this catches partial and cross-site overlaps,
+    # which make it ambiguous which site owns the range.
+    flat = [(site, network)
+            for site in sorted(exceptions)
+            for network in _sorted_networks(exceptions[site])]
+    for i, (site_a, net_a) in enumerate(flat):
+        for site_b, net_b in flat[i + 1:]:
+            if net_a.overlaps(net_b):
+                errors.append(
+                    f"site '{site_a}' {_POOL_EXCEPTIONS_KEY} entry {net_a} overlaps "
+                    f"site '{site_b}' {_POOL_EXCEPTIONS_KEY} entry {net_b}"
+                )
+
     return errors
 
 
-SITE_NETWORKS, SITE_POOLS, _SITE_NETWORKS_ERRORS = parse_site_networks(SITE_NETWORKS_ENV)
+SITE_NETWORKS, SITE_POOLS, SITE_POOL_EXCEPTIONS, _SITE_NETWORKS_ERRORS = \
+    parse_site_networks(SITE_NETWORKS_ENV)
 SITES = list(SITE_NETWORKS.keys())
 
 
@@ -271,15 +443,25 @@ def validate_site_networks():
             file=sys.stderr,
         )
 
-    summary = ", ".join(f"{site}={pool}" for site, pool in SITE_POOLS.items())
-    print(f"INFO: Site networks validated: {summary}", file=sys.stderr)
+    # Sites with no exemptions render exactly as before. The exempted ones are
+    # named in full: an out-of-pool segment is only creatable because of this
+    # line's contents, so it must be readable without opening the ConfigMap.
+    parts = []
+    for site, pool in SITE_POOLS.items():
+        entry = f"{site}={pool}"
+        listed = SITE_POOL_EXCEPTIONS.get(site) or frozenset()
+        if listed:
+            entry += (f" (+{len(listed)} pool-exception(s): "
+                      + ", ".join(str(n) for n in _sorted_networks(listed)) + ")")
+        parts.append(entry)
+    print(f"INFO: Site networks validated: {', '.join(parts)}", file=sys.stderr)
 
     # A typo'd sub-key (e.g. "dell-bcm") is silently ignored here but crash-loops
     # the segment-connectivity worker, which requires both BMC keys. Surface it in
     # this log too. A bare "bmc" lands here as well: it is the pre-vendor-split
     # key, and a ConfigMap still carrying it has not been migrated.
     for site, value in SITE_NETWORKS.items():
-        unknown = sorted(set(value) - {"pool", *_BMC_KEYS})
+        unknown = sorted(set(value) - {"pool", _POOL_EXCEPTIONS_KEY, *_BMC_KEYS})
         if unknown:
             print(
                 f"INFO: site '{site}' has unrecognised SITE_NETWORKS sub-keys "
@@ -308,6 +490,17 @@ def get_site_pool(site: str):
     """Return the site's allocatable pool as an IPv4Network, or None if unknown."""
     canonical = resolve_site(site)
     return SITE_POOLS.get(canonical) if canonical else None
+
+
+def get_site_pool_exceptions(site: str):
+    """Return the site's out-of-pool exemptions as a frozenset of IPv4Network.
+
+    Membership is exact CIDR equality — a listed /22 exempts that /22 only, not
+    the /24s inside it. An unknown site, or one with no list, gives an empty
+    frozenset, so callers need no None handling.
+    """
+    canonical = resolve_site(site)
+    return SITE_POOL_EXCEPTIONS.get(canonical, frozenset()) if canonical else frozenset()
 
 
 def get_site_networks(site: str):
