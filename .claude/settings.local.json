@@ -160,7 +160,8 @@
       "Bash(ps -p 44083 -o command=)",
       "Bash(docker inspect *)",
       "Bash(kill 44083)",
-      "Bash(docker rm *)"
+      "Bash(docker rm *)",
+      "Bash(gh run *)"
     ],
     "deny": [],
     "ask": []
