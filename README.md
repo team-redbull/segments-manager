@@ -17,9 +17,6 @@ Segments Manager is **decentralized and per-site**: VLAN IDs and EPG names are u
 - **MongoDB backend** — async (Motor) with atomic allocation and a short in-memory cache
 - **CSV/Excel export** and real-time search
 - **Responsive web UI** with light/dark themes
-- **Pending firewall-request visibility** — while the segment-connectivity orchestrator waits
-  for firewall approval, a **Requests ID** button next to the segment's status opens
-  a popover with the pending request ids (cleared automatically on completion)
 - **Health monitoring** — `/api/health` pings MongoDB
 
 ---
@@ -75,13 +72,12 @@ podman run -d --name segments-manager -p 8000:8000 --env-file .env segments-mana
 ```bash
 helm install segments-manager deploy/helm \
   --set mongodb.url="mongodb+srv://user:pass@cluster/..." \
-  --set-json siteNetworks='{"site1": {"pool": "192.10.0.0/16", "dell-bmc": "10.50.0.0/16", "cisco-bmc": "10.60.0.0/16"}}'
+  --set-json siteNetworks='{"site1": {"pool": "192.10.0.0/16"}}'
 ```
 
-In a cluster, prefer defining `siteNetworks` once per environment and merging it
-into every chart that needs it, rather than setting it per service — that is what
-keeps segments-manager and segment-connectivity from disagreeing about the site
-list. The `--set-json` form above is for standalone installs.
+In a cluster, prefer defining `siteNetworks` once per environment rather than
+per service, so nothing can disagree about the site list. The `--set-json` form
+above is for standalone installs.
 
 Use `--set mongodb.existingSecret=<name>` to source `MONGODB_URL` from an existing Secret instead.
 
@@ -104,10 +100,9 @@ MONGODB_DB_NAME=segments-manager                 # optional (default: segments-m
 #         not have to widen the pool for every future segment. Exact CIDR match:
 #         listing a /22 permits that /22, not the /24s inside it. Bypasses the
 #         containment check only.
-#   dell-bmc   the site's out-of-band management networks, one per server
-#   cisco-bmc  hardware vendor. Optional, never read per-request; used only at
-#              startup to verify no pool collides with either.
-SITE_NETWORKS={"site1": {"pool": "192.10.0.0/16", "dell-bmc": "10.50.0.0/16", "cisco-bmc": "10.60.0.0/16"}, "site2": {"pool": "193.51.0.0/16", "dell-bmc": "10.51.0.0/16", "cisco-bmc": "10.61.0.0/16"}, "site3": {"pool": "194.52.0.0/16", "dell-bmc": "10.52.0.0/16", "cisco-bmc": "10.62.0.0/16"}}
+# Sub-keys this service does not recognise are ignored — another consumer may
+# own them.
+SITE_NETWORKS={"site1": {"pool": "192.10.0.0/16"}, "site2": {"pool": "193.51.0.0/16"}, "site3": {"pool": "194.52.0.0/16"}}
 
 # Server (Optional)
 SERVER_PORT=8000
@@ -116,7 +111,7 @@ SERVER_PORT=8000
 API_TOKEN=change-me-to-a-long-random-secret   # REQUIRED — the only credential for write requests
 ```
 
-**Fail-fast validation**: the app crashes at startup if `MONGODB_URL` or `API_TOKEN` is unset, or if `SITE_NETWORKS` is missing, malformed, has a site without a `pool`, or defines pools that overlap each other or a BMC network. Invalid also covers a `pool-exceptions` that is not a list, or one holding a bad, non-IPv4, non-strict or duplicated CIDR, a mask outside /16–/31, a reserved range, or an entry overlapping any pool, BMC network or other exception — every one of those would be an entry no segment could ever match. It also refuses to start if the superseded `SITE_PREFIXES` is set while `SITE_NETWORKS` is not — that combination means new code against a stale config.
+**Fail-fast validation**: the app crashes at startup if `MONGODB_URL` or `API_TOKEN` is unset, or if `SITE_NETWORKS` is missing, malformed, has a site without a `pool`, or defines pools that overlap each other. Invalid also covers a `pool-exceptions` that is not a list, or one holding a bad, non-IPv4, non-strict or duplicated CIDR, a mask outside /16–/31, a reserved range, or an entry overlapping any pool or other exception — every one of those would be an entry no segment could ever match. It also refuses to start if the superseded `SITE_PREFIXES` is set while `SITE_NETWORKS` is not — that combination means new code against a stale config.
 
 ---
 
@@ -130,12 +125,10 @@ API_TOKEN=change-me-to-a-long-random-secret   # REQUIRED — the only credential
 | GET  | `/api/segments/by-segment?segment=` | Get one segment by CIDR |
 | PATCH | `/api/segments` | Update a segment's DHCP flag *(auth)* |
 | PUT  | `/api/segments/clusters` | Update cluster assignment *(auth)* |
-| POST | `/api/segments/unlock` | Unlock a segment (Locked → Available) *(auth)* |
-| PUT  | `/api/segments/segment-connectivity-requests` | Set the pending connectivity request ids shown in the UI (empty list clears) *(auth)* |
 | DELETE | `/api/segments?segment=` | Delete a segment by CIDR *(auth)* |
 | POST | `/api/segments/bulk` | Bulk create *(auth)* |
 | POST | `/api/segments/allocate` | Allocate a segment of a given `type` for a cluster at a site *(auth)* |
-| POST | `/api/segments/release` | Release a segment by CIDR (Allocated → Available; 409 if Locked) *(auth)* |
+| POST | `/api/segments/release` | Release a segment by CIDR (Allocated → Available; idempotent) *(auth)* |
 | GET  | `/api/sites` | Configured sites |
 | GET  | `/api/stats` | Per-site statistics |
 | GET  | `/api/health` | Health check (MongoDB connectivity) |
@@ -158,7 +151,7 @@ curl -X POST http://localhost:8000/api/segments/allocate \
   -H "Content-Type: application/json" \
   -d '{"cluster_name":"web-cluster","site":"site1","type":"HC"}'
 
-# Release it again — keyed by the segment CIDR, exactly like unlock
+# Release it again — keyed by the segment CIDR
 curl -X POST http://localhost:8000/api/segments/release \
   -H "Authorization: Bearer $API_TOKEN" \
   -H "Content-Type: application/json" \

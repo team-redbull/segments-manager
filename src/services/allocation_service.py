@@ -2,7 +2,7 @@ import logging
 from typing import Dict, Any
 from fastapi import HTTPException
 
-from ..database import STATUS_ALLOCATED, STATUS_LOCKED
+from ..database import STATUS_ALLOCATED
 from ..models.schemas import SegmentAllocationRequest, SegmentAllocationResponse
 from ..utils.database_utils import DatabaseUtils
 from ..utils.validators import Validators
@@ -75,18 +75,15 @@ class AllocationService:
     async def release_segment(segment: str) -> Dict[str, str]:
         """Release a segment identified by its CIDR (status "Allocated" -> "Available").
 
-        Keyed by the CIDR just like unlock — it is globally unique, so it alone
-        identifies the allocation.
+        Keyed by the CIDR because it is globally unique, so it alone identifies
+        the allocation.
 
-        Status handling:
+        The lifecycle is two-way and has exactly two states, so release is
+        total — every segment is either Allocated or Available:
           "Allocated" -> released (status "Available", cluster_name cleared)
           "Available" -> no-op, HTTP 200. Release is idempotent so a retried
                          call is safe; the segment is already in the state the
                          caller asked for.
-          "Locked"    -> HTTP 409. Nothing was ever allocated, so there is
-                         nothing to release. Erroring also keeps release from
-                         becoming a second path for "Locked" -> "Available";
-                         only /segments/unlock performs that transition.
         """
         logger.info(f"Release request: segment={segment}")
 
@@ -95,16 +92,6 @@ class AllocationService:
             raise HTTPException(status_code=404, detail=f"Segment not found: {segment}")
 
         status = existing.get("status")
-
-        if status == STATUS_LOCKED:
-            raise HTTPException(
-                status_code=409,
-                detail=(
-                    f"Cannot release segment {segment}: status is 'Locked', not 'Allocated'. "
-                    "A locked segment has never been allocated — use POST /api/segments/unlock "
-                    "to make it available."
-                ),
-            )
 
         if status != STATUS_ALLOCATED:
             return {"message": "Segment already released"}

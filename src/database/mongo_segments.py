@@ -21,9 +21,7 @@ from .cache import (
 
 logger = logging.getLogger(__name__)
 
-# Segment lifecycle statuses: Locked -> Available -> Allocated -> Available.
-# Locking is one-way — there is no API surface that re-locks a segment.
-STATUS_LOCKED = "Locked"
+# Segment lifecycle statuses: Available -> Allocated -> Available.
 STATUS_AVAILABLE = "Available"
 STATUS_ALLOCATED = "Allocated"
 
@@ -118,11 +116,8 @@ async def create_segment(document: Dict[str, Any]) -> Dict[str, Any]:
     doc.setdefault("dhcp", True)
     doc.setdefault("cluster_name", None)
     doc.setdefault("allocated_at", None)
-    # New segments start in the "Locked" lifecycle status (firewall rules not
-    # yet open) until an external service unlocks them via
-    # POST /segments/unlock (keyed by the segment CIDR). Lifecycle:
-    # Locked -> Available -> Allocated -> Available.
-    doc.setdefault("status", STATUS_LOCKED)
+    # A new segment is immediately usable: Available -> Allocated -> Available.
+    doc.setdefault("status", STATUS_AVAILABLE)
 
     result = await col.insert_one(doc)
     invalidate_cache(CACHE_KEY_SEGMENTS)
@@ -151,21 +146,26 @@ async def convert_segment_type(
     """Atomically convert a segment's type, returning the PRE-update document.
 
     The whole guard lives in the filter, exactly like allocate_segment above:
-    the segment must not be "Allocated", and — when allowed_from_types is given
-    — must still carry one of the types the caller is allowed to convert FROM.
-    A read-then-write cannot express this. Two conversions racing for one
-    segment both read the old type, both pass the check and both write, so both
-    callers are told they won while only the last write survives.
+    the segment must be Available AND unassigned, and — when allowed_from_types
+    is given — must still carry one of the types the caller is allowed to
+    convert FROM. A read-then-write cannot express this. Two conversions racing
+    for one segment both read the old type, both pass the check and both write,
+    so both callers are told they won while only the last write survives.
+
+    Available AND unassigned, not merely "not Allocated": a segment carrying a
+    cluster_name is in use whatever its status says, and re-typing it would
+    change what that cluster runs on underneath it.
 
     Returns None when nothing matched; the caller reads the segment back to
-    tell 404 / allocated / lost-the-race apart.
+    tell 404 / in-use / lost-the-race apart.
     """
     from pymongo import ReturnDocument
 
     col = get_segments_collection()
     query: Dict[str, Any] = {
         "segment": segment_value,
-        "status": {"$ne": STATUS_ALLOCATED},
+        "status": STATUS_AVAILABLE,
+        "cluster_name": {"$in": [None, ""]},
     }
     if allowed_from_types is not None:
         query["type"] = {"$in": allowed_from_types}

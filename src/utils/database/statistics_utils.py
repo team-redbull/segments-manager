@@ -6,7 +6,7 @@ Handles calculation of site statistics and utilization metrics.
 import logging
 from typing import Dict, Any, List
 
-from ...database import get_segments, STATUS_LOCKED, STATUS_AVAILABLE, STATUS_ALLOCATED
+from ...database import get_segments, STATUS_AVAILABLE, STATUS_ALLOCATED
 from ...config.settings import SITES
 
 logger = logging.getLogger(__name__)
@@ -37,14 +37,12 @@ class StatisticsUtils:
         total_segments = len(segments)
         allocated = sum(1 for s in segments if s.get("status") == STATUS_ALLOCATED)
         available = sum(1 for s in segments if s.get("status") == STATUS_AVAILABLE)
-        locked = sum(1 for s in segments if s.get("status") == STATUS_LOCKED)
 
         return {
             "site": site,
             "total_segments": total_segments,
             "allocated": allocated,
             "available": available,
-            "locked": locked,
             "utilization": round((allocated / total_segments * 100) if total_segments > 0 else 0, 1)
         }
 
@@ -68,7 +66,6 @@ class StatisticsUtils:
             total_segments = len(site_segments)
             allocated = sum(1 for s in site_segments if s.get("status") == STATUS_ALLOCATED)
             available = sum(1 for s in site_segments if s.get("status") == STATUS_AVAILABLE)
-            locked = sum(1 for s in site_segments if s.get("status") == STATUS_LOCKED)
 
             # Per-type usage: allocated out of total for each displayed type.
             by_type = []
@@ -87,8 +84,7 @@ class StatisticsUtils:
                 "total_segments": total_segments,
                 "allocated": allocated,
                 "available": available,
-                "locked": locked,
-                "utilization": round((allocated / total_segments * 100) if total_segments > 0 else 0, 1),
+                    "utilization": round((allocated / total_segments * 100) if total_segments > 0 else 0, 1),
                 "by_type": by_type
             })
 

@@ -1,9 +1,8 @@
 import logging
-from datetime import datetime
 from typing import Optional, List, Dict, Any
 from fastapi import HTTPException
 
-from ..database import STATUS_LOCKED, STATUS_AVAILABLE, STATUS_ALLOCATED
+from ..database import STATUS_AVAILABLE, STATUS_ALLOCATED
 from ..models.schemas import Segment
 from ..utils.database_utils import DatabaseUtils
 from ..utils.validators import Validators
@@ -156,24 +155,23 @@ class SegmentService:
     async def update_segment_type(
         segment_value: str, new_type: str, expected_type: Optional[str] = None
     ) -> Dict[str, str]:
-        """Convert a segment to another type (status returns to "Locked").
+        """Convert a segment to another type. A re-type and nothing else.
 
-        A converted segment needs its firewall rules re-opened for the new
-        type, so conversion resets the segment to the same state a freshly
-        created one starts in: status "Locked" (excluded from allocation until
-        the segment-connectivity orchestrator unlocks it) with every
-        segment_connectivity_* field cleared — the pending request ids belong
-        to the OLD type's firewall requests and would otherwise linger in the
-        UI, and a stale "Workflow failed" note has no other clearing path.
+        The segment stays Available, so it is allocatable under its new type
+        the moment this returns — there is nothing to establish for it first.
+        (Conversion used to reset the segment to "Locked" and clear a set of
+        segment_connectivity_* fields, because the new type needed its firewall
+        rules re-opened before it was safe to allocate. Every firewall is open
+        now, so both the re-lock and those fields are gone.)
 
-        Guards: an "Allocated" segment is in use and is never converted (409).
-        With `expected_type` set, a stored type that matches neither the new
-        type nor `expected_type` is a conversion race — refused (409).
-        Idempotent: repeating a completed conversion converges to the same
-        state (and never re-locks a segment whose lifecycle has moved on to
-        "Allocated").
+        Guards: the segment must be Available AND unassigned — an Allocated
+        segment is in use, and so is one carrying a cluster_name whatever its
+        status says (409 either way). With `expected_type` set, a stored type
+        that matches neither the new type nor `expected_type` is a conversion
+        race — refused (409). Idempotent: repeating a completed conversion
+        converges to the same state.
 
-        Both guards are applied ATOMICALLY, in the update's own filter. They
+        Every guard is applied ATOMICALLY, in the update's own filter. They
         used to be a read, a check and then a write, which is not a
         compare-and-set: two conversions racing for one segment both read the
         old type, both passed the check and both wrote, so both callers were
@@ -181,14 +179,7 @@ class SegmentService:
         filter does not match is diagnosed afterwards, from a fresh read, to
         pick the right status code.
         """
-        converted_state: Dict[str, Any] = {
-            "type": new_type,
-            "status": STATUS_LOCKED,
-            "segment_connectivity_requests": None,
-            "segment_connectivity_requests_submitted_at": None,
-            "segment_connectivity_failure": None,
-            "segment_connectivity_failure_at": None,
-        }
+        converted_state: Dict[str, Any] = {"type": new_type}
         # Which stored types may be converted FROM. `new_type` is always
         # allowed so a repeated call converges instead of conflicting; without
         # expected_type there is no compare-and-set and any type converts.
@@ -207,16 +198,19 @@ class SegmentService:
                 return {"message": "Segment already up to date"}
             logger.info(
                 f"Converted segment {segment_value}: type "
-                f"{previous_segment.get('type')} -> {new_type} (status: {STATUS_LOCKED})"
+                f"{previous_segment.get('type')} -> {new_type}"
             )
             return {"message": "Segment type updated"}
 
-        # Nothing matched — read back to say why (404 / allocated / lost race).
+        # Nothing matched — read back to say why (404 / converged / race /
+        # in-use). Order matters: the convergence case is checked BEFORE the
+        # in-use ones, because a conversion that completed and was then
+        # legitimately allocated must read as done, not as a conflict.
         existing_segment = await SegmentService._get_segment_or_404(segment_value)
         current_type = existing_segment.get("type")
         if current_type == new_type and existing_segment.get("status") == STATUS_ALLOCATED:
             # The conversion is already done and the segment has moved on to
-            # "Allocated" — converged, and deliberately never re-locked.
+            # "Allocated" — a retried call converging, not a conflict.
             return {"message": "Segment already up to date"}
         if expected_type is not None and current_type not in (expected_type, new_type):
             raise HTTPException(
@@ -225,6 +219,17 @@ class SegmentService:
             )
         if existing_segment.get("status") == STATUS_ALLOCATED:
             raise HTTPException(status_code=409, detail="Cannot convert allocated segment")
+        if existing_segment.get("cluster_name"):
+            # Available yet assigned to a cluster: an invariant violation
+            # somewhere upstream. Refuse rather than re-type a segment a
+            # cluster is actually using just because a status field disagrees.
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Cannot convert segment assigned to cluster "
+                    f"'{existing_segment.get('cluster_name')}'"
+                ),
+            )
         # The segment satisfies the guard now but did not when the atomic
         # update ran: it changed underneath us, which is the race itself.
         raise HTTPException(
@@ -259,11 +264,9 @@ class SegmentService:
             update_data = {"cluster_name": None}
 
         # Keep `status` consistent with the cluster assignment — an edit here is
-        # an allocation change like any other. A Locked segment stays Locked:
-        # only the orchestrator's unlock step (POST /api/segments/unlock) may
-        # leave that state, and the lifecycle is one-way from there.
-        if existing_segment.get("status") != STATUS_LOCKED:
-            update_data["status"] = STATUS_ALLOCATED if clean_cluster_name else STATUS_AVAILABLE
+        # an allocation change like any other, and the two now move together
+        # unconditionally (there is no third status to preserve).
+        update_data["status"] = STATUS_ALLOCATED if clean_cluster_name else STATUS_AVAILABLE
 
         success = await DatabaseUtils.update_segment_by_id(segment_id, update_data)
 
@@ -272,117 +275,6 @@ class SegmentService:
 
         logger.info(f"Updated cluster assignment for segment {segment_value}")
         return {"message": "Segment cluster assignment updated successfully"}
-
-    @staticmethod
-    @handle_db_errors
-    @retry_on_network_error(max_retries=3)
-    @log_operation_timing("set_segment_connectivity_requests", threshold_ms=2000)
-    async def set_segment_connectivity_requests(
-        segment_value: str, request_ids: List[int], submitted_at: Optional[datetime] = None
-    ) -> Dict[str, str]:
-        """Replace the pending segment-connectivity request ids displayed for a segment.
-
-        Set by the segment-connectivity orchestrator while its firewall (open-rules)
-        requests await approval; the UI shows the ids beside the segment's
-        status, with `submitted_at` driving the "time since submit" header in
-        the popover. An empty list clears the display (all requests completed).
-        Idempotent: setting the current value is a no-op.
-        """
-        existing_segment = await SegmentService._get_segment_or_404(segment_value)
-
-        new_value = request_ids or None
-        new_submitted_at = submitted_at if new_value else None
-        # A fresh submission (non-empty ids) supersedes any prior failure note:
-        # re-triggering the workflow is exactly the operator's recovery path, so
-        # clearing the "Workflow failed" note here keeps the row consistent.
-        has_failure = existing_segment.get("segment_connectivity_failure") is not None
-        clear_failure = bool(new_value) and has_failure
-        if (
-            existing_segment.get("segment_connectivity_requests") == new_value
-            and existing_segment.get("segment_connectivity_requests_submitted_at") == new_submitted_at
-            and not clear_failure
-        ):
-            return {"message": "Segment already up to date"}
-
-        update: Dict[str, Any] = {
-            "segment_connectivity_requests": new_value,
-            "segment_connectivity_requests_submitted_at": new_submitted_at,
-        }
-        if clear_failure:
-            update["segment_connectivity_failure"] = None
-            update["segment_connectivity_failure_at"] = None
-
-        success = await DatabaseUtils.update_segment_by_id(
-            str(existing_segment["_id"]), update
-        )
-        if not success:
-            raise HTTPException(status_code=500, detail="Failed to update segment")
-
-        logger.info(f"Updated segment {segment_value}: segment_connectivity_requests={new_value}")
-        return {"message": "Segment-connectivity requests updated"}
-
-    @staticmethod
-    @handle_db_errors
-    @retry_on_network_error(max_retries=3)
-    @log_operation_timing("set_segment_connectivity_failure", threshold_ms=2000)
-    async def set_segment_connectivity_failure(
-        segment_value: str, message: str
-    ) -> Dict[str, str]:
-        """Record a terminal segment-connectivity-workflow failure for a segment.
-
-        Set by the segment-connectivity orchestrator when its firewall (open-rules)
-        workflow fails or is cancelled after submission. The UI shows a
-        "Workflow failed" note beside the segment's status (the segment stays
-        Locked — segment-connectivity was never established); `segment_connectivity_failure_at`
-        drives the "N ago" header in the popover. Cleared automatically when a
-        fresh set of request ids is published (see set_segment_connectivity_requests).
-        Idempotent: re-recording the same message is a no-op.
-        """
-        existing_segment = await SegmentService._get_segment_or_404(segment_value)
-
-        if existing_segment.get("segment_connectivity_failure") == message:
-            return {"message": "Segment already up to date"}
-
-        success = await DatabaseUtils.update_segment_by_id(
-            str(existing_segment["_id"]),
-            {
-                "segment_connectivity_failure": message,
-                "segment_connectivity_failure_at": get_current_utc(),
-            },
-        )
-        if not success:
-            raise HTTPException(status_code=500, detail="Failed to update segment")
-
-        logger.info(f"Recorded segment-connectivity failure for segment {segment_value}")
-        return {"message": "Segment-connectivity failure recorded"}
-
-    @staticmethod
-    @handle_db_errors
-    @retry_on_network_error(max_retries=3)
-    @log_operation_timing("unlock_segment_by_segment", threshold_ms=2000)
-    async def unlock_segment_by_segment(segment: str) -> Dict[str, str]:
-        """Unlock a segment identified by its CIDR value (status "Locked" -> "Available").
-
-        "Locked" is the initial status of every new segment (firewall rules
-        not yet open), and segments are excluded from automatic VLAN
-        allocation until unlocked. Intended for callers (e.g. the
-        segment-connectivity orchestrator) that know the network value. This is a
-        one-way lifecycle transition — segments cannot be re-locked via the
-        API. Idempotent: unlocking a segment that is already "Available" (or
-        "Allocated") is a no-op.
-        """
-        existing_segment = await SegmentService._get_segment_or_404(segment)
-
-        if existing_segment.get("status") != STATUS_LOCKED:
-            return {"message": "Segment already unlocked"}
-
-        segment_id = str(existing_segment["_id"])
-        success = await DatabaseUtils.update_segment_by_id(segment_id, {"status": STATUS_AVAILABLE})
-        if not success:
-            raise HTTPException(status_code=500, detail="Failed to unlock segment")
-
-        logger.info(f"Segment {segment} unlocked (status: {STATUS_LOCKED} -> {STATUS_AVAILABLE})")
-        return {"message": "Segment unlocked successfully"}
 
     @staticmethod
     @handle_db_errors

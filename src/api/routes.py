@@ -4,9 +4,8 @@ from fastapi import APIRouter, HTTPException
 
 from ..models.schemas import (
     SegmentAllocationRequest, SegmentAllocationResponse,
-    SegmentRelease, SegmentUnlock, Segment,
-    SegmentDhcpUpdate, SegmentTypeUpdate, SegmentClustersUpdate,
-    SegmentConnectivityRequestsUpdate, SegmentConnectivityFailure
+    SegmentRelease, Segment,
+    SegmentDhcpUpdate, SegmentTypeUpdate, SegmentClustersUpdate
 )
 from ..services.allocation_service import AllocationService
 from ..services.segment_service import SegmentService
@@ -23,7 +22,7 @@ async def get_segments(
     status: Optional[str] = None,
     type: Optional[str] = None,
 ):
-    """Get segments with optional filters (status: Locked | Available | Allocated)"""
+    """Get segments with optional filters (status: Available | Allocated)"""
     return await SegmentService.get_segments(site, status, type)
 
 @router.get("/segments/search")
@@ -68,17 +67,17 @@ async def update_segment_dhcp(
 async def update_segment_type(
     request: SegmentTypeUpdate
 ):
-    """Convert a segment to another type (status returns to "Locked").
+    """Convert a segment to another type. A re-type and nothing else.
 
     Called by the segment-lifecycle orchestrator's convert-segment workflow.
-    Conversion resets the segment to the state a freshly created one starts
-    in: status "Locked" (its firewall rules must be re-opened for the new
-    type before it may be allocated) with all segment-connectivity fields —
-    the old type's pending request ids and any stale failure note — cleared.
+    The segment stays "Available", so it is allocatable under its new type
+    immediately — there is nothing to establish for it first.
 
-    An "Allocated" segment is never converted (409). `expected_type`, when
-    given, is a compare-and-set guard against concurrent conversions: 409 if
-    the stored type matches neither it nor the new type. Idempotent.
+    Guarded on Available AND unassigned: a segment that is "Allocated", or that
+    carries a cluster_name whatever its status, is in use and is never
+    converted (409). `expected_type`, when given, is a compare-and-set guard
+    against concurrent conversions: 409 if the stored type matches neither it
+    nor the new type. Idempotent.
     """
     return await SegmentService.update_segment_type(
         request.segment, request.type, request.expected_type
@@ -93,54 +92,6 @@ async def update_segment_clusters(
     Empty or omitted cluster_name releases the segment.
     """
     return await SegmentService.update_segment_clusters(request.segment, request.cluster_name)
-
-@router.put("/segments/segment-connectivity-requests")
-async def set_segment_connectivity_requests(
-    request: SegmentConnectivityRequestsUpdate
-):
-    """Replace the pending segment-connectivity request ids displayed for a segment.
-
-    Set by the segment-connectivity orchestrator after it submits firewall (open-rules)
-    requests; the UI shows the ids beside the segment's status while they await
-    approval. An empty list clears the display (all requests completed).
-    Idempotent.
-    """
-    return await SegmentService.set_segment_connectivity_requests(
-        request.segment, request.request_ids, request.submitted_at
-    )
-
-@router.put("/segments/segment-connectivity-failure")
-async def set_segment_connectivity_failure(
-    request: SegmentConnectivityFailure
-):
-    """Record a terminal segment-connectivity-workflow failure for a segment.
-
-    Set by the segment-connectivity orchestrator when its firewall (open-rules)
-    workflow fails or is cancelled after submission; the UI shows a
-    "Workflow failed" note beside the segment's status, with the message
-    (including any orphaned request ids) behind the popover. The segment stays
-    Locked — segment-connectivity was never established. The note is cleared
-    automatically when a fresh set of request ids is published (a new run).
-    Idempotent.
-    """
-    return await SegmentService.set_segment_connectivity_failure(
-        request.segment, request.message
-    )
-
-
-@router.post("/segments/unlock")
-async def unlock_segment(
-    request: SegmentUnlock
-):
-    """Unlock a segment identified by its CIDR value (status Locked -> Available).
-
-    New segments start with status "Locked" (firewall rules not yet open) and
-    are excluded from automatic VLAN allocation until unlocked. Intended to be
-    called by the service responsible for opening firewall rules once it has
-    done so. This is a one-way lifecycle transition — there is no endpoint to
-    re-lock a segment. Idempotent.
-    """
-    return await SegmentService.unlock_segment_by_segment(request.segment)
 
 @router.delete("/segments")
 async def delete_segment(segment: str):
@@ -184,12 +135,11 @@ async def release_segment(
 ):
     """Release a segment identified by its CIDR value (status Allocated -> Available).
 
-    Keyed by the segment CIDR exactly like /segments/unlock — the CIDR is
-    globally unique, so no site, cluster name or type is needed.
+    Keyed by the segment CIDR because it is globally unique, so no site,
+    cluster name or type is needed.
 
-    Idempotent for an already-"Available" segment (200). Releasing a "Locked"
-    segment is a 409 — nothing was ever allocated, and release is not a path
-    to "Available" (that is /segments/unlock's job).
+    Idempotent for an already-"Available" segment (200): the lifecycle has
+    exactly two states, so every segment is releasable.
     """
     return await AllocationService.release_segment(request.segment)
 

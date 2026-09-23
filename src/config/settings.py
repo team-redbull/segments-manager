@@ -54,8 +54,7 @@ if not MONGODB_URL:
 # can never drift out of sync.
 #
 # JSON object keyed by site name:
-#   {"site1": {"pool": "192.10.0.0/16",
-#              "dell-bmc": "10.50.0.0/16", "cisco-bmc": "10.60.0.0/16"}, ...}
+#   {"site1": {"pool": "192.10.0.0/16"}, ...}
 #
 #   pool       the /16 (or narrower) every segment at that site must fall INSIDE.
 #              Read on every create — see NetworkValidators.validate_segment_format.
@@ -68,35 +67,26 @@ if not MONGODB_URL:
 #              else, so one entry can never silently authorise the /24s inside
 #              it. It bypasses CONTAINMENT ONLY — mask range, reserved ranges,
 #              network/broadcast, overlap and vlan/name uniqueness all still run.
-#              Startup rejects an entry that overlaps any pool, any BMC network
-#              or another entry (see _find_overlaps), and any entry that could
-#              never be created anyway (see _parse_pool_exceptions).
-#   dell-bmc   the site's static out-of-band management networks, ONE PER SERVER
-#   cisco-bmc  HARDWARE VENDOR — Dell and Cisco BMCs sit on separate /16s. This
-#              service never reads them per-request; they exist here only so
-#              startup can check that no pool collides with a management network.
-#              The segment-connectivity workflow is the component that actually
-#              uses them (it opens firewall rules from each MCE segment to both).
+#              Startup rejects an entry that overlaps any pool or another entry
+#              (see _find_overlaps), and any entry that could never be created
+#              anyway (see _parse_pool_exceptions).
 #
-# The same structure is consumed by segment-connectivity, so wherever an
-# environment defines it, it must be defined ONCE and rendered into both
-# services' config — a per-service copy is how the two site lists drift apart.
-# In a Helm/Argo CD deployment that is the chart's `siteNetworks` value, which
-# renders this env var into the ConfigMap. Sub-keys this service does not
-# recognise are ignored on purpose — another consumer may own them.
+# In a Helm/Argo CD deployment this comes from the chart's `siteNetworks` value,
+# which renders the env var into the ConfigMap. Sub-keys this service does not
+# recognise are ignored on purpose — another consumer may own them. (The
+# `dell-bmc` / `cisco-bmc` keys used to live here, validated so that no pool
+# could collide with an out-of-band management network. They were read by the
+# firewall workflow, which no longer exists, so nothing defines them now.)
 SITE_NETWORKS_ENV = os.getenv("SITE_NETWORKS", "")
 
 # Superseded by SITE_NETWORKS. Read only to detect a stale ConfigMap; never used.
 _LEGACY_SITE_PREFIXES_ENV = os.getenv("SITE_PREFIXES", "")
 
-_BMC_KEYS = ("dell-bmc", "cisco-bmc")
 _POOL_EXCEPTIONS_KEY = "pool-exceptions"
 
 _SITE_NETWORKS_EXAMPLE = (
-    'SITE_NETWORKS=\'{"site1": {"pool": "192.10.0.0/16", '
-    '"dell-bmc": "10.50.0.0/16", "cisco-bmc": "10.60.0.0/16"}, '
-    '"site2": {"pool": "193.51.0.0/16", '
-    '"dell-bmc": "10.51.0.0/16", "cisco-bmc": "10.61.0.0/16"}}\''
+    'SITE_NETWORKS=\'{"site1": {"pool": "192.10.0.0/16"}, '
+    '"site2": {"pool": "193.51.0.0/16"}}\''
 )
 
 
@@ -173,20 +163,13 @@ def parse_site_networks(raw: str):
         pool = _parse_cidr(site, "pool", value["pool"], errors)
         if pool is not None:
             pools[site] = pool
-        # The BMC keys are optional here (this service never reads them per
-        # request); parsed only to validate them and to check disjointness.
-        # There is one per server hardware vendor — see the header.
-        for bmc_key in _BMC_KEYS:
-            if bmc_key in value:
-                _parse_cidr(site, bmc_key, value[bmc_key], errors)
-
         # Parsed even when `pool` above failed, so a config that is wrong in both
         # places reports both faults in one run — the promise in the docstring.
         exceptions[site] = _parse_pool_exceptions(site, value, errors)
 
         networks[site] = value
 
-    errors.extend(_find_overlaps(parsed, pools, exceptions))
+    errors.extend(_find_overlaps(pools, exceptions))
     return networks, pools, exceptions, errors
 
 
@@ -292,40 +275,18 @@ def _parse_pool_exceptions(site: str, value: dict, errors: list):
     return frozenset(parsed)
 
 
-def _iter_bmc_networks(parsed: dict):
-    """Yield (site, key, IPv4Network) for every parseable BMC network."""
-    for site, value in parsed.items():
-        if not isinstance(value, dict):
-            continue
-        for bmc_key in _BMC_KEYS:
-            if bmc_key not in value:
-                continue
-            try:
-                yield site, bmc_key, ipaddress.ip_network(value[bmc_key], strict=True)
-            except (ValueError, TypeError):
-                continue  # already reported by _parse_cidr
+def _find_overlaps(pools: dict, exceptions: dict) -> list:
+    """Check that no pool or pool-exception collides with another.
 
+    Two overlapping pools would make site containment ambiguous — not
+    detectable anywhere else, and startup is the only place it can be caught.
 
-def _find_overlaps(parsed: dict, pools: dict, exceptions: dict) -> list:
-    """Check that no pool or pool-exception collides with another, or with a BMC network.
-
-    Two overlapping pools would make site containment ambiguous. A pool
-    overlapping a BMC network means segments would be allocated on top of an
-    out-of-band management network. Neither is detectable anywhere else, and
-    startup is the only place they can be caught.
-
-    That used to hold because containment bounded every segment. It no longer
-    does: a request is admitted by containment OR by an exact match against the
-    site's `pool-exceptions`, and the exception path bypasses containment
-    entirely. So a mistyped exception is the ONE way a segment can now land on a
-    BMC network or inside a range another site owns, and the four exception
-    checks below are the only thing standing in front of it.
-
-    Every vendor's BMC network is checked, not just one: a site has a Dell and a
-    Cisco management /16, and colliding with either is the same fault.
-    Deliberately NOT checked: BMC-vs-BMC overlap. This service owns `pool` and
-    `pool-exceptions`, and inventing invariants over keys it never reads is how
-    the two services' validation drifts apart.
+    That used to be the whole story, because containment bounded every segment.
+    It no longer does: a request is admitted by containment OR by an exact match
+    against the site's `pool-exceptions`, and the exception path bypasses
+    containment entirely. So a mistyped exception is the ONE way a segment can
+    now land inside a range another site owns, and the exception checks below
+    are the only thing standing in front of it.
     """
     errors = []
     sites = list(pools)
@@ -336,16 +297,6 @@ def _find_overlaps(parsed: dict, pools: dict, exceptions: dict) -> list:
                 errors.append(
                     f"site '{site_a}' pool {pools[site_a]} overlaps "
                     f"site '{site_b}' pool {pools[site_b]}"
-                )
-
-    bmc_networks = list(_iter_bmc_networks(parsed))
-
-    for bmc_site, bmc_key, bmc in bmc_networks:
-        for pool_site, pool in pools.items():
-            if pool.overlaps(bmc):
-                errors.append(
-                    f"site '{pool_site}' pool {pool} overlaps site "
-                    f"'{bmc_site}' {bmc_key} BMC network {bmc}"
                 )
 
     for site in sorted(exceptions):
@@ -372,15 +323,6 @@ def _find_overlaps(parsed: dict, pools: dict, exceptions: dict) -> list:
                     errors.append(
                         f"site '{site}' {_POOL_EXCEPTIONS_KEY} entry {exception} "
                         f"overlaps site '{other_site}' pool {other_pool}"
-                    )
-
-            # Any site's BMC network — the exact fault the pool loop above
-            # exists to prevent, now reachable because containment is bypassed.
-            for bmc_site, bmc_key, bmc in bmc_networks:
-                if exception.overlaps(bmc):
-                    errors.append(
-                        f"site '{site}' {_POOL_EXCEPTIONS_KEY} entry {exception} "
-                        f"overlaps site '{bmc_site}' {bmc_key} BMC network {bmc}"
                     )
 
     # Exception vs exception. Exact duplicates within one site are caught in
@@ -456,12 +398,11 @@ def validate_site_networks():
         parts.append(entry)
     print(f"INFO: Site networks validated: {', '.join(parts)}", file=sys.stderr)
 
-    # A typo'd sub-key (e.g. "dell-bcm") is silently ignored here but crash-loops
-    # the segment-connectivity worker, which requires both BMC keys. Surface it in
-    # this log too. A bare "bmc" lands here as well: it is the pre-vendor-split
-    # key, and a ConfigMap still carrying it has not been migrated.
+    # A typo'd sub-key (e.g. "poool") is silently ignored, so surface it in this
+    # log: another consumer may legitimately own a sub-key, but an operator who
+    # misspelt one of ours needs to see that it did nothing.
     for site, value in SITE_NETWORKS.items():
-        unknown = sorted(set(value) - {"pool", _POOL_EXCEPTIONS_KEY, *_BMC_KEYS})
+        unknown = sorted(set(value) - {"pool", _POOL_EXCEPTIONS_KEY})
         if unknown:
             print(
                 f"INFO: site '{site}' has unrecognised SITE_NETWORKS sub-keys "
@@ -504,7 +445,8 @@ def get_site_pool_exceptions(site: str):
 
 
 def get_site_networks(site: str):
-    """Return the site's raw topology dict (pool, dell-bmc, ...), or None if unknown."""
+    """Return the site's raw topology dict (pool, pool-exceptions, ...), or None
+    if the site is unknown."""
     canonical = resolve_site(site)
     return SITE_NETWORKS.get(canonical) if canonical else None
 

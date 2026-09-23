@@ -52,8 +52,7 @@ segments_2/
 │
 ├── scripts/                   # Utility scripts
 │   ├── audit_site_pools.py
-│   ├── migrate_drop_shared_clusters.py
-│   └── migrate_segment_connectivity_fields.py
+│   └── migrate_drop_shared_clusters.py
 │
 ├── deploy/                    # Deployment configurations
 │   ├── helm/                 # Kubernetes Helm chart

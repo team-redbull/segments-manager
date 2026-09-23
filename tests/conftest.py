@@ -10,12 +10,9 @@ container image). Configure the target with environment variables:
 
 The suite assumes the server is configured with:
     SITE_NETWORKS={"site1": {"pool": "192.10.0.0/16",
-                             "pool-exceptions": ["172.20.4.0/22"],
-                             "dell-bmc": "10.50.0.0/16", "cisco-bmc": "10.60.0.0/16"},
-                   "site2": {"pool": "193.51.0.0/16",
-                             "dell-bmc": "10.51.0.0/16", "cisco-bmc": "10.61.0.0/16"},
-                   "site3": {"pool": "194.52.0.0/16",
-                             "dell-bmc": "10.52.0.0/16", "cisco-bmc": "10.62.0.0/16"}}
+                             "pool-exceptions": ["172.20.4.0/22"]},
+                   "site2": {"pool": "193.51.0.0/16"},
+                   "site3": {"pool": "194.52.0.0/16"}}
     API_TOKEN=test-token   (or match SEGMENTS_MANAGER_API_TOKEN)
 """
 
@@ -103,26 +100,18 @@ def segment_factory():
     Returns the raw `requests.Response`. Any segment that was successfully
     created (HTTP 200 with an id) is deleted during teardown.
 
-    New segments start locked (excluded from auto-allocation) by default, so
-    this factory unlocks them right after creation unless `keep_locked=True`
-    is passed — most tests expect an immediately-allocatable segment.
+    A new segment is Available, so it is immediately allocatable — there is no
+    unlock step. (This factory used to take `keep_locked` and POST
+    /api/segments/unlock after every create, back when segments were born
+    Locked.)
     """
     created_cidrs = []
 
     def _create(**body):
-        keep_locked = body.pop("keep_locked", False)
         body.setdefault("dhcp", False)
         r = requests.post(f"{API}/segments", json=body, headers=AUTH_HEADERS, timeout=TIMEOUT)
         if r.status_code == 200 and "id" in r.json():
-            cidr = body["segment"]
-            created_cidrs.append(cidr)
-            if not keep_locked:
-                requests.post(
-                    f"{API}/segments/unlock",
-                    json={"segment": cidr},
-                    headers=AUTH_HEADERS,
-                    timeout=TIMEOUT,
-                )
+            created_cidrs.append(body["segment"])
         return r
 
     yield _create
