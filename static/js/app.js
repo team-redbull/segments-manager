@@ -638,8 +638,6 @@ function updateSortHeaders() {
 }
 
 async function loadSegments(showSkeleton = false) {
-    // Every render path below rewrites the table, orphaning the popover's anchor.
-    closeReqIdsPopover();
     const container = document.getElementById("segmentsList");
     if (showSkeleton && container) {
         container.innerHTML = rowSkeleton().repeat(8);
