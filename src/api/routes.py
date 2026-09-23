@@ -12,6 +12,7 @@ from ..services.segment_service import SegmentService
 from ..services.stats_service import StatsService
 from ..services.logs_service import LogsService
 from ..services.export_service import ExportService
+from ..database.cache import invalidate_cache, CACHE_KEY_SEGMENTS
 
 router = APIRouter()
 
@@ -21,8 +22,15 @@ async def get_segments(
     site: Optional[str] = None,
     status: Optional[str] = None,
     type: Optional[str] = None,
+    fresh: bool = False,
 ):
-    """Get segments with optional filters (status: Available | Allocated)"""
+    """Get segments with optional filters (status: Available | Allocated).
+
+    fresh=true drops the server-side segments cache first, so edits made
+    directly in MongoDB show up immediately (the UI's Refresh button).
+    """
+    if fresh:
+        invalidate_cache(CACHE_KEY_SEGMENTS)
     return await SegmentService.get_segments(site, status, type)
 
 @router.get("/segments/search")

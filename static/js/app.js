@@ -637,7 +637,9 @@ function updateSortHeaders() {
     });
 }
 
-async function loadSegments(showSkeleton = false) {
+// fresh=true asks the server to bypass its segments cache (Refresh button).
+// Returns true on success, false if the load failed.
+async function loadSegments(showSkeleton = false, fresh = false) {
     const container = document.getElementById("segmentsList");
     if (showSkeleton && container) {
         container.innerHTML = rowSkeleton().repeat(8);
@@ -649,6 +651,7 @@ async function loadSegments(showSkeleton = false) {
         if (currentFilter === "available") params.append("status", "Available");
         else if (currentFilter === "allocated") params.append("status", "Allocated");
         if (currentSite) params.append("site", currentSite);
+        if (fresh) params.append("fresh", "true");
 
         const queryString = params.toString();
         const endpoint = "/segments" + (queryString ? "?" + queryString : "");
@@ -680,7 +683,7 @@ async function loadSegments(showSkeleton = false) {
                     ? "Try a different search term or filter, or clear the current filters."
                     : "No segments match the current filters."
             );
-            return;
+            return true;
         }
 
         updateSegmentCount(segments.length);
@@ -714,6 +717,7 @@ async function loadSegments(showSkeleton = false) {
             })
             .join("");
         applyColumnVisibility();
+        return true;
     } catch (error) {
         if (container) {
             updateSegmentCount(0);
@@ -723,6 +727,7 @@ async function loadSegments(showSkeleton = false) {
                 error.message || "Please refresh the page to try again."
             );
         }
+        return false;
     }
 }
 
@@ -869,6 +874,24 @@ document.addEventListener("DOMContentLoaded", function () {
         if (!cell) return;
         e.preventDefault();
         handleCopyableActivate(cell);
+    });
+
+    // Manual refresh: re-read everything straight from the database
+    const refreshBtn = document.getElementById("refreshBtn");
+    refreshBtn.addEventListener("click", async () => {
+        if (refreshBtn.disabled) return;
+        refreshBtn.disabled = true;
+        refreshBtn.classList.add("is-loading");
+        try {
+            // Segments first: its fresh=true drops the server cache that stats reads too.
+            const ok = await loadSegments(false, true);
+            await loadStats(false);
+            if (ok) showSuccess("Data refreshed from the database");
+            else showError("Refresh failed");
+        } finally {
+            refreshBtn.disabled = false;
+            refreshBtn.classList.remove("is-loading");
+        }
     });
 
     // First load

@@ -298,6 +298,14 @@ svg {
     border-color: var(--border-strong);
 }
 
+/* Refresh button: spin the icon while a reload is in flight */
+.btn.is-loading .icon {
+    animation: btn-spin 0.8s linear infinite;
+}
+@keyframes btn-spin {
+    to { transform: rotate(360deg); }
+}
+
 .btn-ghost {
     background: transparent;
     color: var(--text-muted);
