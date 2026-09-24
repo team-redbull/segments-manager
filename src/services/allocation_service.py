@@ -19,7 +19,11 @@ class AllocationService:
     @retry_on_network_error(max_retries=3)
     @log_operation_timing("allocate_segment", threshold_ms=2000)
     async def allocate_segment(request: SegmentAllocationRequest) -> SegmentAllocationResponse:
-        """Allocate a VLAN segment of the requested type for a cluster at a site."""
+        """Allocate a VLAN segment for a cluster at a site, as the requested type.
+
+        Available segments carry no type: any of them at the site is handed
+        out, and becomes `request.type` in the same atomic update.
+        """
         logger.info(
             f"Allocation request: cluster={request.cluster_name}, site={request.site}, type={request.type}"
         )
@@ -45,7 +49,7 @@ class AllocationService:
                 allocated_at=existing["allocated_at"]
             )
 
-        # Atomically find and allocate an available segment of this type for this site
+        # Atomically take any available segment at this site and stamp the type on it
         allocated_segment = await DatabaseUtils.find_and_allocate_segment(
             request.site, request.cluster_name, request.type
         )
@@ -53,7 +57,7 @@ class AllocationService:
         if not allocated_segment:
             raise HTTPException(
                 status_code=503,
-                detail=f"No available {request.type} segments for site: {request.site}"
+                detail=f"No available segments for site: {request.site}"
             )
 
         logger.info(f"Allocated VLAN {allocated_segment['vlan_id']} (EPG: {allocated_segment['epg_name']}) to {request.cluster_name}")
@@ -80,7 +84,8 @@ class AllocationService:
 
         The lifecycle is two-way and has exactly two states, so release is
         total — every segment is either Allocated or Available:
-          "Allocated" -> released (status "Available", cluster_name cleared)
+          "Allocated" -> released (status "Available", cluster_name and type
+                         cleared — both were set by the allocation)
           "Available" -> no-op, HTTP 200. Release is idempotent so a retried
                          call is safe; the segment is already in the state the
                          caller asked for.

@@ -1,12 +1,18 @@
 from typing import Optional, Literal
 from datetime import datetime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 SegmentType = Literal["MCE", "INVENTORY", "HC", "PXE"]
 
 
 class Segment(BaseModel):
-    type: SegmentType = Field(default="HC", description="Segment type", examples=["MCE"])
+    """A segment definition, as created (POST /api/segments and /bulk).
+
+    There is no `type`: a segment is not born as any particular kind. The type
+    is ALLOCATION state, like cluster_name — POST /api/segments/allocate stamps
+    the requested type onto the segment it hands out, and release clears it
+    again. Sending one here is rejected (extra="forbid").
+    """
     site: str = Field(..., description="Site name (must be one of the configured sites)", examples=["site1"])
     vlan_id: int = Field(ge=1, le=4094, description="VLAN ID (1-4094)", examples=[100])
     epg_name: str = Field(..., description="Endpoint Group name", examples=["EPG_PROD_01"])
@@ -20,7 +26,6 @@ class Segment(BaseModel):
         "json_schema_extra": {
             "examples": [
                 {
-                    "type": "MCE",
                     "site": "site1",
                     "vlan_id": 100,
                     "epg_name": "EPG_PROD_01",
@@ -36,8 +41,10 @@ class SegmentAllocationRequest(BaseModel):
     """Request for POST /api/segments/allocate.
 
     `type` is required — an allocator must never have to guess which kind of
-    segment the caller wants. It also scopes the idempotency check, so one
-    cluster can hold e.g. an MCE and an HC segment at the same site.
+    segment the caller wants. Available segments carry no type, so it does not
+    narrow the pool: any Available segment at the site is handed out and
+    becomes this type. It also scopes the idempotency check, so one cluster can
+    hold e.g. an MCE and an HC segment at the same site.
     """
     cluster_name: str = Field(..., description="Name of the cluster requesting allocation", examples=["cluster-prod-01"])
     site: str = Field(..., description="Site where the segment should be allocated", examples=["site1"])
@@ -61,7 +68,7 @@ class SegmentAllocationResponse(BaseModel):
     vlan_id: int = Field(..., description="Allocated VLAN ID", examples=[100])
     cluster_name: str = Field(..., description="Cluster name", examples=["cluster-prod-01"])
     site: str = Field(..., description="Site name", examples=["site1"])
-    type: SegmentType = Field(..., description="Type of the allocated segment", examples=["MCE"])
+    type: SegmentType = Field(..., description="Type the segment was allocated as", examples=["MCE"])
     segment: str = Field(..., description="Allocated network segment", examples=["192.168.1.0/24"])
     epg_name: str = Field(..., description="Endpoint Group name", examples=["EPG_PROD_01"])
     allocated_at: datetime = Field(..., description="Allocation timestamp")
@@ -87,9 +94,8 @@ class SegmentDhcpUpdate(BaseModel):
     """Update request keyed by the segment's natural key (its CIDR).
 
     `dhcp` is the only in-place-editable segment field — identity fields
-    (site, vlan_id, epg_name, segment) are immutable after creation, `type`
-    changes only through the conversion endpoint (PUT /segments/type), and
-    lifecycle fields are server-managed.
+    (site, vlan_id, epg_name, segment) are immutable after creation, and
+    lifecycle fields (status, cluster_name, type, ...) are server-managed.
     """
     segment: str = Field(..., description="Network segment in CIDR notation (unique per segment)", examples=["192.168.1.0/24"])
     dhcp: bool = Field(..., description="New DHCP setting for this segment")
@@ -107,44 +113,35 @@ class SegmentDhcpUpdate(BaseModel):
     }
 
 
-class SegmentTypeUpdate(BaseModel):
-    """Request for PUT /api/segments/type — convert a segment to another type.
-
-    `type` is the NEW type to set. `expected_type` is an optional
-    compare-and-set guard: the current type the caller believes it is
-    converting FROM. If the stored type matches neither `type` (already
-    converted) nor `expected_type`, the conversion is refused (409) — another
-    caller re-typed the segment first.
-    """
-    segment: str = Field(..., description="Network segment in CIDR notation (unique per segment)", examples=["192.168.1.0/24"])
-    type: SegmentType = Field(..., description="New segment type to set", examples=["MCE"])
-    expected_type: Optional[SegmentType] = Field(
-        default=None,
-        description="Compare-and-set guard: the current type being converted from; 409 if the stored type differs (unless it already equals the new type)",
-        examples=["HC"],
-    )
-
-    model_config = {
-        "extra": "forbid",
-        "json_schema_extra": {
-            "examples": [
-                {
-                    "segment": "192.168.1.0/24",
-                    "type": "MCE",
-                    "expected_type": "HC"
-                }
-            ]
-        }
-    }
-
-
 class SegmentClustersUpdate(BaseModel):
+    """Request for PUT /api/segments/clusters — a manual allocation edit.
+
+    Assigning a cluster allocates the segment, so it needs the `type` to
+    allocate it AS, exactly like POST /api/segments/allocate: an Allocated
+    segment always has a type and an Available one never does. Releasing (empty
+    or omitted cluster_name) clears the type, so sending one there is refused
+    rather than silently dropped.
+    """
     segment: str = Field(..., description="Network segment in CIDR notation (unique per segment)", examples=["192.168.1.0/24"])
     cluster_name: Optional[str] = Field(
         default=None,
         description="Cluster name to assign (one segment belongs to at most one cluster); empty or omitted releases the segment",
         examples=["cluster-prod-01"],
     )
+    type: Optional[SegmentType] = Field(
+        default=None,
+        description="Type to allocate the segment as — required with a cluster_name, forbidden without one",
+        examples=["HC"],
+    )
+
+    @model_validator(mode="after")
+    def _type_goes_with_cluster(self) -> "SegmentClustersUpdate":
+        assigning = bool(self.cluster_name and self.cluster_name.strip())
+        if assigning and self.type is None:
+            raise ValueError("type is required when assigning a cluster_name")
+        if not assigning and self.type is not None:
+            raise ValueError("type is only accepted with a cluster_name — releasing clears it")
+        return self
 
     model_config = {
         "extra": "forbid",
@@ -152,7 +149,8 @@ class SegmentClustersUpdate(BaseModel):
             "examples": [
                 {
                     "segment": "192.168.1.0/24",
-                    "cluster_name": "cluster-prod-01"
+                    "cluster_name": "cluster-prod-01",
+                    "type": "HC"
                 }
             ]
         }

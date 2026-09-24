@@ -55,7 +55,6 @@ class SegmentService:
     def _segment_to_dict(segment: Segment) -> Dict[str, Any]:
         """Convert segment object to dictionary"""
         return {
-            "type": segment.type,
             "site": segment.site,
             "vlan_id": segment.vlan_id,
             "epg_name": segment.epg_name,
@@ -132,9 +131,9 @@ class SegmentService:
         """Update a segment's DHCP flag — the only in-place-editable segment field.
 
         Identity fields (site, vlan_id, epg_name, segment) are immutable after
-        creation; `type` changes only through conversion (update_segment_type);
-        lifecycle fields (status, cluster_name, ...) are managed by their own
-        endpoints. Idempotent: setting the current value is a no-op.
+        creation; lifecycle fields (status, type, cluster_name, ...) are
+        managed by the allocation endpoints. Idempotent: setting the current
+        value is a no-op.
         """
         existing_segment = await SegmentService._get_segment_or_404(segment_value)
 
@@ -151,101 +150,16 @@ class SegmentService:
     @staticmethod
     @handle_db_errors
     @retry_on_network_error(max_retries=3)
-    @log_operation_timing("update_segment_type", threshold_ms=2000)
-    async def update_segment_type(
-        segment_value: str, new_type: str, expected_type: Optional[str] = None
-    ) -> Dict[str, str]:
-        """Convert a segment to another type. A re-type and nothing else.
-
-        The segment stays Available, so it is allocatable under its new type
-        the moment this returns — there is nothing to establish for it first.
-        (Conversion used to reset the segment to "Locked" and clear a set of
-        segment_connectivity_* fields, because the new type needed its firewall
-        rules re-opened before it was safe to allocate. Every firewall is open
-        now, so both the re-lock and those fields are gone.)
-
-        Guards: the segment must be Available AND unassigned — an Allocated
-        segment is in use, and so is one carrying a cluster_name whatever its
-        status says (409 either way). With `expected_type` set, a stored type
-        that matches neither the new type nor `expected_type` is a conversion
-        race — refused (409). Idempotent: repeating a completed conversion
-        converges to the same state.
-
-        Every guard is applied ATOMICALLY, in the update's own filter. They
-        used to be a read, a check and then a write, which is not a
-        compare-and-set: two conversions racing for one segment both read the
-        old type, both passed the check and both wrote, so both callers were
-        answered "updated" while only the last write survived. Whatever the
-        filter does not match is diagnosed afterwards, from a fresh read, to
-        pick the right status code.
-        """
-        converted_state: Dict[str, Any] = {"type": new_type}
-        # Which stored types may be converted FROM. `new_type` is always
-        # allowed so a repeated call converges instead of conflicting; without
-        # expected_type there is no compare-and-set and any type converts.
-        allowed_from_types = (
-            [expected_type, new_type] if expected_type is not None else None
-        )
-
-        previous_segment = await DatabaseUtils.convert_segment_type(
-            segment_value, converted_state, allowed_from_types
-        )
-        if previous_segment is not None:
-            if all(
-                previous_segment.get(key) == value
-                for key, value in converted_state.items()
-            ):
-                return {"message": "Segment already up to date"}
-            logger.info(
-                f"Converted segment {segment_value}: type "
-                f"{previous_segment.get('type')} -> {new_type}"
-            )
-            return {"message": "Segment type updated"}
-
-        # Nothing matched — read back to say why (404 / converged / race /
-        # in-use). Order matters: the convergence case is checked BEFORE the
-        # in-use ones, because a conversion that completed and was then
-        # legitimately allocated must read as done, not as a conflict.
-        existing_segment = await SegmentService._get_segment_or_404(segment_value)
-        current_type = existing_segment.get("type")
-        if current_type == new_type and existing_segment.get("status") == STATUS_ALLOCATED:
-            # The conversion is already done and the segment has moved on to
-            # "Allocated" — a retried call converging, not a conflict.
-            return {"message": "Segment already up to date"}
-        if expected_type is not None and current_type not in (expected_type, new_type):
-            raise HTTPException(
-                status_code=409,
-                detail=f"Segment type is '{current_type}', expected '{expected_type}'"
-            )
-        if existing_segment.get("status") == STATUS_ALLOCATED:
-            raise HTTPException(status_code=409, detail="Cannot convert allocated segment")
-        if existing_segment.get("cluster_name"):
-            # Available yet assigned to a cluster: an invariant violation
-            # somewhere upstream. Refuse rather than re-type a segment a
-            # cluster is actually using just because a status field disagrees.
-            raise HTTPException(
-                status_code=409,
-                detail=(
-                    f"Cannot convert segment assigned to cluster "
-                    f"'{existing_segment.get('cluster_name')}'"
-                ),
-            )
-        # The segment satisfies the guard now but did not when the atomic
-        # update ran: it changed underneath us, which is the race itself.
-        raise HTTPException(
-            status_code=409,
-            detail=f"Segment {segment_value} changed during conversion — retry"
-        )
-
-    @staticmethod
-    @handle_db_errors
-    @retry_on_network_error(max_retries=3)
     @log_operation_timing("update_segment_clusters", threshold_ms=2000)
-    async def update_segment_clusters(segment_value: str, cluster_name: Optional[str]) -> Dict[str, str]:
-        """Assign a segment to a single cluster, or release it (empty/omitted).
+    async def update_segment_clusters(
+        segment_value: str, cluster_name: Optional[str], type: Optional[str] = None
+    ) -> Dict[str, str]:
+        """Assign a segment to a single cluster as `type`, or release it
+        (empty/omitted cluster_name).
 
         One segment belongs to at most one cluster — there is no shared
-        (comma-separated) form.
+        (comma-separated) form. The request model guarantees `type` is set
+        exactly when a cluster is being assigned.
         """
         logger.info(f"Updating cluster assignment for segment: {segment_value}")
 
@@ -258,14 +172,15 @@ class SegmentService:
             Validators.validate_cluster_name(clean_cluster_name)
             update_data = {
                 "cluster_name": clean_cluster_name,
+                "type": type,
                 "allocated_at": get_current_utc(),
             }
         else:
-            update_data = {"cluster_name": None}
+            update_data = {"cluster_name": None, "type": None}
 
         # Keep `status` consistent with the cluster assignment — an edit here is
-        # an allocation change like any other, and the two now move together
-        # unconditionally (there is no third status to preserve).
+        # an allocation change like any other, and status, cluster and type all
+        # move together unconditionally (there is no third status to preserve).
         update_data["status"] = STATUS_ALLOCATED if clean_cluster_name else STATUS_AVAILABLE
 
         success = await DatabaseUtils.update_segment_by_id(segment_id, update_data)

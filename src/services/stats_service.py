@@ -24,16 +24,23 @@ class StatsService:
     @retry_on_network_error(max_retries=3)
     @log_operation_timing("get_stats", threshold_ms=1000)
     async def get_stats() -> List[Dict[str, Any]]:
-        """Per-site usage for the UI: site name + segment count + per-type breakdown.
+        """Per-site usage for the UI site cards: {site, total_segments,
+        allocated, by_type}.
 
-        The site cards render the total segment count alongside the per-type
-        usage, so the response is trimmed to {site, total_segments, by_type}.
-        Site-level utilization is still computed by get_all_sites_statistics()
-        for the health check.
+        The card header shows the site's allocated segments out of its total;
+        the body lists how many are allocated AS each type. The per-type
+        figures are plain counts, never "x of y": an Available segment has no
+        type, so a type has no total of its own. Site-level utilization is
+        still computed by get_all_sites_statistics() for the health check.
         """
         all_stats = await StatisticsUtils.get_all_sites_statistics()
         return [
-            {"site": s["site"], "total_segments": s["total_segments"], "by_type": s["by_type"]}
+            {
+                "site": s["site"],
+                "total_segments": s["total_segments"],
+                "allocated": s["allocated"],
+                "by_type": s["by_type"],
+            }
             for s in all_stats
         ]
 

@@ -11,10 +11,9 @@ from ...config.settings import SITES
 
 logger = logging.getLogger(__name__)
 
-# Segment types surfaced in the per-site usage breakdown, in display order.
-# Every SegmentType is listed: a type missing here is silently absent from the
-# site cards while its segments still exist, so the cards under-report the
-# site's real segment count.
+# Segment types in the per-site allocation breakdown, in display order. Every
+# SegmentType is listed: a type missing here would have its allocations
+# silently absent from the site cards while still counted in the site total.
 DISPLAY_TYPES = ["HC", "MCE", "INVENTORY", "PXE"]
 
 
@@ -67,25 +66,26 @@ class StatisticsUtils:
             allocated = sum(1 for s in site_segments if s.get("status") == STATUS_ALLOCATED)
             available = sum(1 for s in site_segments if s.get("status") == STATUS_AVAILABLE)
 
-            # Per-type usage: allocated out of total for each displayed type.
-            by_type = []
-            for seg_type in DISPLAY_TYPES:
-                type_segments = [s for s in site_segments if s.get("type") == seg_type]
-                type_total = len(type_segments)
-                type_allocated = sum(1 for s in type_segments if s.get("status") == STATUS_ALLOCATED)
-                by_type.append({
+            # Allocated segments per type. A count, not an "x of y": only an
+            # Allocated segment has a type, so a type has no total of its own.
+            by_type = [
+                {
                     "type": seg_type,
-                    "allocated": type_allocated,
-                    "total": type_total,
-                })
+                    "allocated": sum(
+                        1 for s in site_segments
+                        if s.get("status") == STATUS_ALLOCATED and s.get("type") == seg_type
+                    ),
+                }
+                for seg_type in DISPLAY_TYPES
+            ]
 
             stats.append({
                 "site": site,
                 "total_segments": total_segments,
                 "allocated": allocated,
                 "available": available,
-                    "utilization": round((allocated / total_segments * 100) if total_segments > 0 else 0, 1),
-                "by_type": by_type
+                "utilization": round((allocated / total_segments * 100) if total_segments > 0 else 0, 1),
+                "by_type": by_type,
             })
 
         return stats

@@ -5,7 +5,7 @@ from fastapi import APIRouter, HTTPException
 from ..models.schemas import (
     SegmentAllocationRequest, SegmentAllocationResponse,
     SegmentRelease, Segment,
-    SegmentDhcpUpdate, SegmentTypeUpdate, SegmentClustersUpdate
+    SegmentDhcpUpdate, SegmentClustersUpdate
 )
 from ..services.allocation_service import AllocationService
 from ..services.segment_service import SegmentService
@@ -25,6 +25,9 @@ async def get_segments(
     fresh: bool = False,
 ):
     """Get segments with optional filters (status: Available | Allocated).
+
+    Only Allocated segments have a type, so a `type` filter never matches an
+    Available one.
 
     fresh=true drops the server-side segments cache first, so edits made
     directly in MongoDB show up immediately (the UI's Refresh button).
@@ -66,40 +69,23 @@ async def update_segment_dhcp(
     """Update a segment's DHCP flag — the only in-place-editable segment field.
 
     Identity fields (site, vlan_id, epg_name, segment) are immutable after
-    creation; `type` changes only through the conversion endpoint
-    (PUT /segments/type); lifecycle fields are managed by their own endpoints.
+    creation; lifecycle fields (status, type, cluster_name) are managed by the
+    allocation endpoints.
     """
     return await SegmentService.update_segment_dhcp(request.segment, request.dhcp)
-
-@router.put("/segments/type")
-async def update_segment_type(
-    request: SegmentTypeUpdate
-):
-    """Convert a segment to another type. A re-type and nothing else.
-
-    Called by the segment-lifecycle orchestrator's convert-segment workflow.
-    The segment stays "Available", so it is allocatable under its new type
-    immediately — there is nothing to establish for it first.
-
-    Guarded on Available AND unassigned: a segment that is "Allocated", or that
-    carries a cluster_name whatever its status, is in use and is never
-    converted (409). `expected_type`, when given, is a compare-and-set guard
-    against concurrent conversions: 409 if the stored type matches neither it
-    nor the new type. Idempotent.
-    """
-    return await SegmentService.update_segment_type(
-        request.segment, request.type, request.expected_type
-    )
 
 @router.put("/segments/clusters")
 async def update_segment_clusters(
     request: SegmentClustersUpdate
 ):
-    """Assign a segment to a single cluster.
+    """Assign a segment to a single cluster, as a given type.
 
-    Empty or omitted cluster_name releases the segment.
+    `type` is required with a cluster_name — an allocated segment always has
+    one. Empty or omitted cluster_name releases the segment and clears its type.
     """
-    return await SegmentService.update_segment_clusters(request.segment, request.cluster_name)
+    return await SegmentService.update_segment_clusters(
+        request.segment, request.cluster_name, request.type
+    )
 
 @router.delete("/segments")
 async def delete_segment(segment: str):
@@ -130,10 +116,11 @@ async def create_segments_bulk(
 async def allocate_segment(
     request: SegmentAllocationRequest
 ):
-    """Allocate a VLAN segment of a given type for a cluster at a site.
+    """Allocate a VLAN segment for a cluster at a site, as a given type.
 
-    Idempotent per (cluster_name, site, type): a cluster that already holds a
-    segment of that type at that site gets the same one back.
+    Available segments have no type: any one at the site is handed out and
+    becomes `type`. Idempotent per (cluster_name, site, type): a cluster that
+    already holds a segment of that type at that site gets the same one back.
     """
     return await AllocationService.allocate_segment(request)
 
@@ -146,8 +133,9 @@ async def release_segment(
     Keyed by the segment CIDR because it is globally unique, so no site,
     cluster name or type is needed.
 
-    Idempotent for an already-"Available" segment (200): the lifecycle has
-    exactly two states, so every segment is releasable.
+    Clears the segment's type along with its cluster. Idempotent for an
+    already-"Available" segment (200): the lifecycle has exactly two states,
+    so every segment is releasable.
     """
     return await AllocationService.release_segment(request.segment)
 

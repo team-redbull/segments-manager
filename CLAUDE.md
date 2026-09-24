@@ -114,7 +114,7 @@ Chart in `deploy/helm/`. Set `mongodb.url` (stored in a generated Secret) or poi
 4. **Atomic allocation** — `allocate_segment()` uses `find_one_and_update(..., return_document=AFTER)` so concurrent callers can never receive the same segment.
 5. **Short in-memory cache** — the full segments list is cached (60s TTL) with in-flight request de-duplication (`src/database/cache.py`); invalidated on every write.
 6. **Fail-fast config** — missing `MONGODB_URL`, missing `API_TOKEN`, or an invalid `SITE_NETWORKS` crashes at startup. Invalid covers: unset, unparseable, a site with no `pool`, a non-strict or non-IPv4 CIDR, sites differing only by case, pools that overlap each other, and a `pool-exceptions` that is not a list, or one holding a bad, non-IPv4, non-strict or duplicated CIDR, a mask outside /16–/31, a reserved range, or an entry overlapping any pool or other exception. Setting the superseded `SITE_PREFIXES` while `SITE_NETWORKS` is unset also aborts — that combination means new code against a stale ConfigMap.
-7. **No outbound calls** — this service talks to MongoDB and nothing else. The orchestrator calls *in* (create, allocate, convert); it is never called *from* here.
+7. **No outbound calls** — this service talks to MongoDB and nothing else. The orchestrator calls *in* (create, allocate); it is never called *from* here.
 
 ---
 
@@ -175,7 +175,8 @@ Collection: **`segments`**
 ```python
 {
     "_id":          ObjectId,        # internal only — never part of the API surface
-    "type":         str,             # "MCE" | "INVENTORY" | "HC" | "PXE", defaults to "HC"
+    "type":         str | None,      # "MCE" | "INVENTORY" | "HC" | "PXE" — ALLOCATION state:
+                                     # None while Available, set by allocate, cleared by release
     "site":         str,             # e.g. "site1"
     "vlan_id":      int,             # 1–4094
     "epg_name":     str,
@@ -190,7 +191,7 @@ Collection: **`segments`**
 }
 ```
 
-> **`type` is one of `MCE`, `INVENTORY`, `HC`, `PXE`**, enforced by a Pydantic `Literal` (422 on any other value). Optional on create — defaults to `"HC"` if omitted. **Required** on `POST /api/segments/allocate`: the allocator must never guess which kind of segment a caller wants. (Release does *not* take it — the CIDR already determines the type.) Changing it is a CONVERSION, not an edit: `PUT /api/segments/type` `{segment, type, expected_type?}` re-types the segment and nothing else — it stays `Available`, so it is allocatable under its new type immediately. Guarded on **Available AND unassigned**: an `Allocated` segment, or one carrying a `cluster_name` whatever its status, is in use and answers 409. Idempotent (a repeat converges, including on a segment since allocated as its new type); `expected_type` is an optional compare-and-set (409 if the stored type matches neither it nor the new type) so two concurrent conversions can't silently hijack one segment. Called by the orchestrator's convert-segment workflow.
+> **`type` is ALLOCATION state, like `cluster_name` — an Available segment has none.** It is one of `MCE`, `INVENTORY`, `HC`, `PXE`, enforced by a Pydantic `Literal` (422 on any other value), and it exists only on an Allocated segment. **Rejected on create** (`Segment` has no `type`; `extra="forbid"` answers 422): a segment is not born as any kind, it joins its site's one shared Available pool. **Required** on `POST /api/segments/allocate`: the allocator must never guess which kind of segment a caller wants — but the type does NOT narrow the search, it is stamped onto whichever Available segment is chosen, in the same atomic update that allocates it. Release clears it with the cluster (release takes no type — the CIDR identifies the allocation). `PUT /api/segments/clusters` is a manual allocation edit and follows the same rule: `type` is required with a `cluster_name` and refused without one. The invariant is **Available ⇔ `type` is None**; `init_storage()` enforces it on existing data by nulling the type of every non-Allocated segment. (Type used to be fixed at creation — defaulting to `HC` — with per-type pools and a `PUT /api/segments/type` conversion endpoint the orchestrator's convert-segment workflow used to re-type spare segments between them. With one shared pool there is nothing to convert, so the endpoint and the workflow are gone. Do not reintroduce a creation-time type.)
 
 > **A new segment is born `Available`.** The lifecycle is two-way and has exactly two states: `Available → Allocated → Available`. `allocate_segment()` only considers segments with `status: "Available"`. (There used to be a third, `Locked`, which every new segment started in until the orchestrator's firewall workflow opened its rules and called `POST /api/segments/unlock`. Every firewall is open now, so that status, that endpoint, the two `segment-connectivity-*` endpoints and the `segment_connectivity_*` fields are all gone. Do not reintroduce a status that blocks allocation without a mechanism that clears it.)
 
@@ -200,7 +201,7 @@ Collection: **`segments`**
 - `unique({segment: 1})` — globally unique CIDR
 - `{cluster_name: 1}` — allocation lookups
 - `{site: 1}` — site filtering
-- `{site: 1, type: 1, status: 1}` — the atomic allocator's selector (supersedes the old `{site, status}` index, which `init_storage()` drops)
+- `{site: 1, status: 1}` — the atomic allocator's selector (Available segments have no type to filter on; supersedes the per-type `{site, type, status}` index, which `init_storage()` drops)
 
 **ObjectId rule**: `_id` is internal. Outbound segment dicts convert it via `str(...)` (`_doc_to_segment`), but the API never accepts an id — services resolve segments by their CIDR (`get_segment_by_segment`, 404 if unknown) and only then use the resolved `_id` for the Mongo write.
 
@@ -214,6 +215,7 @@ POST /api/segments/allocate  {cluster_name, site, type}
     ├─ validators: site, cluster_name
     ├─ DatabaseUtils.find_existing_allocation()  → idempotent per (cluster, site, type)
     └─ DatabaseUtils.find_and_allocate_segment() → allocate_segment() atomic find_one_and_update
+         on {site, status: Available}, $set {status: Allocated, type, cluster_name, allocated_at}
     ↓
 Return VLANAllocationResponse
 ```

@@ -124,13 +124,13 @@ API_TOKEN=change-me-to-a-long-random-secret   # REQUIRED — the only credential
 | POST | `/api/segments` | Create a segment *(auth)* |
 | GET  | `/api/segments/by-segment?segment=` | Get one segment by CIDR |
 | PATCH | `/api/segments` | Update a segment's DHCP flag *(auth)* |
-| PUT  | `/api/segments/clusters` | Update cluster assignment *(auth)* |
+| PUT  | `/api/segments/clusters` | Update cluster assignment — `type` required with a cluster, cleared on release *(auth)* |
 | DELETE | `/api/segments?segment=` | Delete a segment by CIDR *(auth)* |
 | POST | `/api/segments/bulk` | Bulk create *(auth)* |
-| POST | `/api/segments/allocate` | Allocate a segment of a given `type` for a cluster at a site *(auth)* |
-| POST | `/api/segments/release` | Release a segment by CIDR (Allocated → Available; idempotent) *(auth)* |
+| POST | `/api/segments/allocate` | Allocate any Available segment at a site to a cluster, as the given `type` *(auth)* |
+| POST | `/api/segments/release` | Release a segment by CIDR (Allocated → Available, type cleared; idempotent) *(auth)* |
 | GET  | `/api/sites` | Configured sites |
-| GET  | `/api/stats` | Per-site statistics |
+| GET  | `/api/stats` | Per-site `total_segments` and `allocated` count |
 | GET  | `/api/health` | Health check (MongoDB connectivity) |
 | GET  | `/api/export/segments/{csv,excel}` | Export segments |
 
@@ -145,7 +145,7 @@ curl -X POST http://localhost:8000/api/segments \
   -H "Content-Type: application/json" \
   -d '{"site":"site1","vlan_id":100,"epg_name":"EPG_PROD_01","segment":"192.168.1.0/24","dhcp":true}'
 
-# Allocate for a cluster (type is required)
+# Allocate for a cluster — segments are created typeless; the type is given here (required)
 curl -X POST http://localhost:8000/api/segments/allocate \
   -H "Authorization: Bearer $API_TOKEN" \
   -H "Content-Type: application/json" \

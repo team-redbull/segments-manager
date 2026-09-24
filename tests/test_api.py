@@ -7,13 +7,14 @@ Covers the decentralized, per-site MongoDB model:
   * VLAN IDs and EPG names are unique PER SITE
   * site IP-prefix enforcement, CIDR/subnet validation
   * atomic allocate / idempotent re-allocate / release
+  * segment type as ALLOCATION state: none while Available, stamped on by
+    allocate, cleared by release
   * auth enforcement on write endpoints
   * single-segment operations keyed by the segment CIDR (the natural key —
     unique + immutable); the ObjectId-based /segments/{id} routes are gone
 """
 
 import uuid
-from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 import requests
@@ -68,6 +69,14 @@ class TestRemovedEndpoints:
                          headers=AUTH_HEADERS, timeout=TIMEOUT)
         assert r.status_code == 404
 
+    def test_type_conversion_endpoint_gone(self):
+        # An Available segment has no type to convert — the type is stamped on
+        # at allocation — so the convert-segment workflow and its endpoint went.
+        r = requests.put(f"{API}/segments/type",
+                         json={"segment": "192.10.1.0/24", "type": "MCE"},
+                         headers=AUTH_HEADERS, timeout=TIMEOUT)
+        assert r.status_code == 404
+
 
 # ---------------------------------------------------------------------------
 # Authentication
@@ -75,7 +84,7 @@ class TestRemovedEndpoints:
 class TestAuthRequired:
     def test_create_requires_auth(self):
         v = next_vlan()
-        body = {"type": "MCE", "site": "site1", "vlan_id": v, "epg_name": _uid(),
+        body = {"site": "site1", "vlan_id": v, "epg_name": _uid(),
                 "segment": cidr_for("site1", v), "dhcp": False}
         assert requests.post(f"{API}/segments", json=body, timeout=TIMEOUT).status_code == 401
 
@@ -184,56 +193,101 @@ class TestSegmentValidation:
 
 
 # ---------------------------------------------------------------------------
-# Segment type (MCE / INVENTORY / HC / PXE)
+# Segment type (MCE / INVENTORY / HC / PXE) — allocation state, not identity
 # ---------------------------------------------------------------------------
+def _get_segment(cidr):
+    return requests.get(f"{API}/segments/by-segment", params={"segment": cidr},
+                        timeout=TIMEOUT).json()
+
+
+def _allocate(cluster, seg_type, site="site1"):
+    return requests.post(f"{API}/segments/allocate",
+                         json={"cluster_name": cluster, "site": site, "type": seg_type},
+                         headers=AUTH_HEADERS, timeout=TIMEOUT)
+
+
 class TestSegmentType:
-    def test_each_valid_type_accepted(self, segment_factory):
-        for t in ("MCE", "INVENTORY", "HC", "PXE"):
-            v = next_vlan()
-            cidr = cidr_for("site1", v)
-            r = segment_factory(type=t, site="site1", vlan_id=v, epg_name=_uid(),
-                                segment=cidr)
-            assert r.status_code == 200, r.text
-            got = requests.get(f"{API}/segments/by-segment", params={"segment": cidr},
-                               timeout=TIMEOUT)
-            assert got.json()["type"] == t
-
-    def test_invalid_type_rejected(self, segment_factory):
-        v = next_vlan()
-        r = segment_factory(type="BOGUS", site="site1", vlan_id=v, epg_name=_uid(),
-                            segment=cidr_for("site1", v))
-        assert r.status_code == 422
-
-    def test_missing_type_defaults_to_hc(self):
+    def test_new_segment_has_no_type(self, segment_factory):
+        # A segment is not born as any kind: the type is stamped on when it
+        # is allocated. (It used to be set at creation, defaulting to HC.)
         v = next_vlan()
         cidr = cidr_for("site1", v)
-        body = {"site": "site1", "vlan_id": v, "epg_name": _uid(),
-                "segment": cidr, "dhcp": False}
-        r = requests.post(f"{API}/segments", json=body, headers=AUTH_HEADERS, timeout=TIMEOUT)
+        r = segment_factory(site="site1", vlan_id=v, epg_name=_uid(), segment=cidr)
         assert r.status_code == 200, r.text
+        got = _get_segment(cidr)
+        assert got["status"] == "Available"
+        assert got["type"] is None
 
-        try:
-            got = requests.get(f"{API}/segments/by-segment", params={"segment": cidr},
-                               timeout=TIMEOUT)
-            assert got.json()["type"] == "HC"
-        finally:
-            requests.delete(f"{API}/segments", params={"segment": cidr},
-                            headers=AUTH_HEADERS, timeout=TIMEOUT)
-
-    def test_get_segments_filters_by_type(self, segment_factory):
+    def test_type_on_create_rejected(self, segment_factory):
         v = next_vlan()
-        r = segment_factory(type="PXE", site="site1", vlan_id=v, epg_name=_uid(),
+        r = segment_factory(type="HC", site="site1", vlan_id=v, epg_name=_uid(),
                             segment=cidr_for("site1", v))
-        sid = r.json()["id"]
+        assert r.status_code == 422  # extra="forbid"
+
+    @pytest.mark.parametrize("seg_type", ["MCE", "INVENTORY", "HC", "PXE"])
+    def test_allocation_stamps_the_type_and_release_clears_it(
+        self, segment_factory, release_allocated, seg_type
+    ):
+        v = next_vlan()
+        assert segment_factory(site="site1", vlan_id=v, epg_name=_uid(),
+                               segment=cidr_for("site1", v)).status_code == 200
+
+        a = _allocate(f"it-type-{uuid.uuid4().hex[:6]}", seg_type)
+        assert a.status_code == 200, a.text
+        allocated = a.json()["segment"]
+        release_allocated(allocated)
+        assert a.json()["type"] == seg_type
+        assert _get_segment(allocated)["type"] == seg_type
+
+        rel = requests.post(f"{API}/segments/release", json={"segment": allocated},
+                            headers=AUTH_HEADERS, timeout=TIMEOUT)
+        assert rel.status_code == 200, rel.text
+        got = _get_segment(allocated)
+        assert got["status"] == "Available"
+        assert got["type"] is None
+
+    def test_any_available_segment_serves_any_type(self, segment_factory, release_allocated):
+        # The pool is shared: one Available segment can be allocated as HC
+        # and, once released, as PXE — nothing about it was ever HC-only.
+        v = next_vlan()
+        assert segment_factory(site="site1", vlan_id=v, epg_name=_uid(),
+                               segment=cidr_for("site1", v)).status_code == 200
+
+        for seg_type in ("HC", "PXE"):
+            a = _allocate(f"it-pool-{uuid.uuid4().hex[:6]}", seg_type)
+            assert a.status_code == 200, a.text
+            release_allocated(a.json()["segment"])
+            assert a.json()["type"] == seg_type
+            requests.post(f"{API}/segments/release", json={"segment": a.json()["segment"]},
+                          headers=AUTH_HEADERS, timeout=TIMEOUT)
+
+    def test_allocate_invalid_type_rejected(self):
+        r = _allocate("it-bogus-type", "BOGUS")
+        assert r.status_code == 422
+
+    def test_allocate_without_type_rejected(self):
+        r = requests.post(f"{API}/segments/allocate",
+                          json={"cluster_name": "it-no-type", "site": "site1"},
+                          headers=AUTH_HEADERS, timeout=TIMEOUT)
+        assert r.status_code == 422
+
+    def test_get_segments_filters_by_allocated_type(self, segment_factory, release_allocated):
+        v = next_vlan()
+        assert segment_factory(site="site1", vlan_id=v, epg_name=_uid(),
+                               segment=cidr_for("site1", v)).status_code == 200
+        a = _allocate(f"it-filter-{uuid.uuid4().hex[:6]}", "PXE")
+        assert a.status_code == 200, a.text
+        allocated = a.json()["segment"]
+        release_allocated(allocated)
 
         matching = requests.get(f"{API}/segments", params={"site": "site1", "type": "PXE"},
                                 timeout=TIMEOUT)
         assert matching.status_code == 200
-        assert any(s["_id"] == sid for s in matching.json())
+        assert any(s["segment"] == allocated for s in matching.json())
 
         non_matching = requests.get(f"{API}/segments", params={"site": "site1", "type": "HC"},
                                     timeout=TIMEOUT)
-        assert not any(s["_id"] == sid for s in non_matching.json())
+        assert not any(s["segment"] == allocated for s in non_matching.json())
 
 
 # ---------------------------------------------------------------------------
@@ -315,20 +369,35 @@ class TestSegmentCRUD:
         r = segment_factory(site="site1", vlan_id=v, epg_name=_uid(), segment=seg)
         assert r.status_code == 200
 
+        # assigning a cluster allocates the segment, so it needs a type
+        untyped = requests.put(f"{API}/segments/clusters",
+                               json={"segment": seg, "cluster_name": "cluster-a"},
+                               headers=AUTH_HEADERS, timeout=TIMEOUT)
+        assert untyped.status_code == 422, untyped.text
+
         u = requests.put(f"{API}/segments/clusters",
-                         json={"segment": seg, "cluster_name": "cluster-a"},
+                         json={"segment": seg, "cluster_name": "cluster-a", "type": "MCE"},
                          headers=AUTH_HEADERS, timeout=TIMEOUT)
         assert u.status_code == 200, u.text
         got = requests.get(f"{API}/segments/by-segment", params={"segment": seg},
                            timeout=TIMEOUT).json()
         assert got["cluster_name"] == "cluster-a"
+        assert got["type"] == "MCE"
+        assert got["status"] == "Allocated"
 
         # a comma-separated list is no longer a valid cluster name — shared
         # segments were retired, one segment belongs to at most one cluster
         shared = requests.put(f"{API}/segments/clusters",
-                              json={"segment": seg, "cluster_name": "shared-a,shared-b"},
+                              json={"segment": seg, "cluster_name": "shared-a,shared-b",
+                                    "type": "MCE"},
                               headers=AUTH_HEADERS, timeout=TIMEOUT)
         assert shared.status_code == 400, shared.text
+
+        # releasing clears the type, so sending one with a release is refused
+        typed_release = requests.put(f"{API}/segments/clusters",
+                                     json={"segment": seg, "cluster_name": "", "type": "MCE"},
+                                     headers=AUTH_HEADERS, timeout=TIMEOUT)
+        assert typed_release.status_code == 422, typed_release.text
 
         # empty cluster_name releases the segment (also makes teardown deletable)
         rel = requests.put(f"{API}/segments/clusters",
@@ -338,6 +407,8 @@ class TestSegmentCRUD:
         got = requests.get(f"{API}/segments/by-segment", params={"segment": seg},
                            timeout=TIMEOUT).json()
         assert got["cluster_name"] is None
+        assert got["type"] is None
+        assert got["status"] == "Available"
 
     def test_get_unknown_segment_404(self):
         r = requests.get(f"{API}/segments/by-segment", params={"segment": "10.255.254.0/24"},
@@ -442,176 +513,50 @@ class TestAllocation:
         assert got["status"] == "Available"
 
 
-class TestSegmentTypeConversion:
-    def _get(self, cidr):
-        return requests.get(f"{API}/segments/by-segment", params={"segment": cidr}, timeout=TIMEOUT)
-
-    def _convert(self, cidr, new_type, expected_type=None, headers=AUTH_HEADERS):
-        body = {"segment": cidr, "type": new_type}
-        if expected_type is not None:
-            body["expected_type"] = expected_type
-        return requests.put(f"{API}/segments/type", json=body, headers=headers, timeout=TIMEOUT)
-
-    def test_convert_available_segment_stays_available(self, segment_factory):
-        # Re-typing is the whole operation: the segment must come out
-        # Available, i.e. allocatable as its new type straight away.
-        v = next_vlan()
-        cidr = cidr_for("site1", v)
-        r = segment_factory(site="site1", vlan_id=v, epg_name=_uid(), segment=cidr, type="HC")
-        assert r.status_code == 200, r.text
-        assert self._get(cidr).json()["status"] == "Available"
-
-        conv = self._convert(cidr, "MCE", expected_type="HC")
-        assert conv.status_code == 200, conv.text
-
-        seg = self._get(cidr).json()
-        assert seg["type"] == "MCE"
-        assert seg["status"] == "Available"
-
-    def test_convert_refuses_a_cluster_assigned_segment(self, segment_factory, release_allocated):
-        """A segment a cluster holds is never re-typed, whatever its status.
-
-        The guard is Available AND unassigned, and the two halves are separate
-        checks — both in the atomic update filter and in the diagnosis that
-        follows a non-match. Only the status half is reachable over HTTP:
-        `POST /api/segments` whitelists its fields and drops `cluster_name`, so
-        an API client cannot manufacture the Available-yet-assigned
-        combination. That leaves the cluster_name check defensive — it exists
-        for a segment whose status and cluster assignment have drifted apart,
-        which allocation cannot produce because it writes both in one update.
-        """
-        v = next_vlan()
-        cidr = cidr_for("site1", v)
-        r = segment_factory(site="site1", vlan_id=v, epg_name=_uid(), segment=cidr,
-                            type="HC", cluster_name="ignored-on-create")
-        assert r.status_code == 200, r.text
-        # Proof of the above: the create API drops it.
-        assert self._get(cidr).json()["cluster_name"] is None
-
-        requests.put(f"{API}/segments/clusters",
-                     json={"segment": cidr, "cluster_name": "conv-cluster"},
-                     headers=AUTH_HEADERS, timeout=TIMEOUT)
-        release_allocated(cidr)
-
-        got = self._get(cidr).json()
-        assert got["cluster_name"] == "conv-cluster"
-        conv = self._convert(cidr, "MCE", expected_type="HC")
-        assert conv.status_code == 409, conv.text
-        assert self._get(cidr).json()["type"] == "HC"  # untouched
-
-    def test_convert_idempotent_repeat(self, segment_factory):
-        v = next_vlan()
-        cidr = cidr_for("site1", v)
-        segment_factory(site="site1", vlan_id=v, epg_name=_uid(), segment=cidr, type="HC")
-
-        first = self._convert(cidr, "MCE", expected_type="HC")
-        # A retry after a lost response repeats the SAME call — expected_type
-        # no longer matches the stored type, but the new type does: accepted.
-        second = self._convert(cidr, "MCE", expected_type="HC")
-        assert first.status_code == 200 and second.status_code == 200
-        assert "up to date" in second.json()["message"].lower()
-        assert self._get(cidr).json()["type"] == "MCE"
-
-    def test_convert_expected_type_mismatch_409(self, segment_factory):
-        v = next_vlan()
-        cidr = cidr_for("site1", v)
-        segment_factory(site="site1", vlan_id=v, epg_name=_uid(), segment=cidr, type="HC")
-
-        r = self._convert(cidr, "PXE", expected_type="MCE")
-        assert r.status_code == 409, r.text
-        assert self._get(cidr).json()["type"] == "HC"  # untouched
-
-    def test_convert_allocated_409(self, segment_factory, release_allocated):
-        v = next_vlan()
-        cidr = cidr_for("site1", v)
-        segment_factory(site="site1", vlan_id=v, epg_name=_uid(), segment=cidr, type="HC")
-        requests.put(f"{API}/segments/clusters",
-                     json={"segment": cidr, "cluster_name": "conv-cluster"},
-                     headers=AUTH_HEADERS, timeout=TIMEOUT)
-        release_allocated(cidr)
-        assert self._get(cidr).json()["status"] == "Allocated"
-
-        r = self._convert(cidr, "MCE", expected_type="HC")
-        assert r.status_code == 409, r.text
-        assert self._get(cidr).json()["type"] == "HC"
-
-    def test_convert_same_type_on_allocated_is_noop(self, segment_factory, release_allocated):
-        # Conversion already happened and the lifecycle moved on — a stale
-        # repeat must never re-lock an in-use segment.
-        v = next_vlan()
-        cidr = cidr_for("site1", v)
-        segment_factory(site="site1", vlan_id=v, epg_name=_uid(), segment=cidr, type="MCE")
-        requests.put(f"{API}/segments/clusters",
-                     json={"segment": cidr, "cluster_name": "conv-cluster"},
-                     headers=AUTH_HEADERS, timeout=TIMEOUT)
-        release_allocated(cidr)
-
-        r = self._convert(cidr, "MCE", expected_type="HC")
-        assert r.status_code == 200, r.text
-        assert "up to date" in r.json()["message"].lower()
-        assert self._get(cidr).json()["status"] == "Allocated"
-
-    def test_concurrent_conversions_only_one_wins(self, segment_factory):
-        # expected_type is a compare-and-set, so racing conversions of ONE
-        # segment to DIFFERENT types must produce exactly one winner. This
-        # used to be a read, a check and then a write: both callers read the
-        # old type, both passed the check and both wrote, so both were told
-        # "updated" while only the last write survived.
-        v = next_vlan()
-        cidr = cidr_for("site1", v)
-        segment_factory(site="site1", vlan_id=v, epg_name=_uid(), segment=cidr, type="HC")
-
-        targets = ["MCE", "PXE", "INVENTORY"]
-        with ThreadPoolExecutor(max_workers=len(targets)) as pool:
-            responses = list(pool.map(
-                lambda t: self._convert(cidr, t, expected_type="HC"), targets
-            ))
-
-        winners = [t for t, r in zip(targets, responses) if r.status_code == 200]
-        assert len(winners) == 1, (
-            "exactly one conversion may win, got "
-            f"{[(t, r.status_code, r.text) for t, r in zip(targets, responses)]}"
-        )
-        assert all(r.status_code == 409 for r in responses if r.status_code != 200)
-        assert self._get(cidr).json()["type"] == winners[0]
-
-    def test_convert_unknown_segment_404(self):
-        assert self._convert("10.99.99.0/24", "MCE").status_code == 404
-
-    def test_convert_bad_type_422(self, segment_factory):
-        v = next_vlan()
-        cidr = cidr_for("site1", v)
-        segment_factory(site="site1", vlan_id=v, epg_name=_uid(), segment=cidr)
-        r = requests.put(f"{API}/segments/type",
-                         json={"segment": cidr, "type": "BOGUS"},
-                         headers=AUTH_HEADERS, timeout=TIMEOUT)
-        assert r.status_code == 422
-
-    def test_convert_requires_auth(self, segment_factory):
-        v = next_vlan()
-        cidr = cidr_for("site1", v)
-        segment_factory(site="site1", vlan_id=v, epg_name=_uid(), segment=cidr)
-        assert self._convert(cidr, "MCE", headers=None).status_code == 401
-
-
 # ---------------------------------------------------------------------------
 # Stats
 # ---------------------------------------------------------------------------
 class TestStats:
     def test_stats_shape(self):
-        """GET /api/stats is trimmed to {site, total_segments, by_type} for the UI site cards.
+        """GET /api/stats is trimmed to {site, total_segments, allocated, by_type} for the UI site cards.
 
-        Site-level utilization is still computed by get_all_sites_statistics()
-        but is only exposed via /api/health.
+        by_type holds plain allocated COUNTS per type — no per-type total, since
+        an Available segment has no type. Every type is listed, and together
+        they account for every allocation. Site-level utilization is still
+        computed by get_all_sites_statistics() but is only exposed via /api/health.
         """
         r = requests.get(f"{API}/stats", timeout=TIMEOUT)
         assert r.status_code == 200
         stats = r.json()
         assert isinstance(stats, list) and len(stats) > 0
-        s = stats[0]
-        assert set(s) == {"site", "total_segments", "by_type"}
-        for entry in s["by_type"]:
-            assert set(entry) == {"type", "allocated", "total"}
+        for s in stats:
+            assert set(s) == {"site", "total_segments", "allocated", "by_type"}
+            assert 0 <= s["allocated"] <= s["total_segments"]
+            assert [t["type"] for t in s["by_type"]] == ["HC", "MCE", "INVENTORY", "PXE"]
+            for entry in s["by_type"]:
+                assert set(entry) == {"type", "allocated"}
+            assert sum(t["allocated"] for t in s["by_type"]) == s["allocated"]
+
+    def test_stats_count_an_allocation(self, segment_factory, release_allocated):
+        def site1():
+            stats = requests.get(f"{API}/stats", timeout=TIMEOUT).json()
+            return next(s for s in stats if s["site"] == "site1")
+
+        v = next_vlan()
+        assert segment_factory(site="site1", vlan_id=v, epg_name=_uid(),
+                               segment=cidr_for("site1", v)).status_code == 200
+        def by_type(stat):
+            return {t["type"]: t["allocated"] for t in stat["by_type"]}
+
+        before = site1()
+        a = _allocate(f"it-stats-{uuid.uuid4().hex[:6]}", "PXE")
+        assert a.status_code == 200, a.text
+        release_allocated(a.json()["segment"])
+        after = site1()
+        assert after["allocated"] == before["allocated"] + 1
+        assert after["total_segments"] == before["total_segments"]
+        assert by_type(after)["PXE"] == by_type(before)["PXE"] + 1
+        assert by_type(after)["HC"] == by_type(before)["HC"]
 
     def test_health_exposes_site_totals(self):
         r = requests.get(f"{API}/health", timeout=TIMEOUT)

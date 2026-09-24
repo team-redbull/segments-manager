@@ -95,6 +95,7 @@ Collection **`segments`**:
 | `segment` | str | CIDR, e.g. `192.168.1.0/24` |
 | `dhcp` | bool | |
 | `description` | str | |
+| `type` | str \| None | `MCE`/`INVENTORY`/`HC`/`PXE` — set by allocation, `None` while Available |
 | `cluster_name` | str \| None | `None` = available; one cluster name (never a list) |
 | `allocated_at` | datetime \| None | |
 
@@ -103,6 +104,7 @@ Collection **`segments`**:
 - `unique({segment})` — globally unique CIDR
 - `{cluster_name}` — allocation lookups
 - `{site}` — site filtering
+- `{site, status}` — the atomic allocator's selector
 
 ---
 
@@ -122,16 +124,16 @@ POST /api/segments/allocate {cluster_name, site, type} → AllocationService.all
   → find_existing_allocation()  (idempotent short-circuit, scoped by type)
   → find_and_allocate_segment() → allocate_segment():
         find_one_and_update(
-          {site, type, status: "Available"},
-          {$set: {status: "Allocated", cluster_name, allocated_at}},
+          {site, status: "Available"},
+          {$set: {status: "Allocated", type, cluster_name, allocated_at}},
           sort=[(vlan_id, 1)], return_document=AFTER)
 ```
-`find_one_and_update` makes allocation a single atomic operation — concurrent requests can never be handed the same segment.
+`find_one_and_update` makes allocation a single atomic operation — concurrent requests can never be handed the same segment. Available segments carry no type, so the pool is shared: the requested type is stamped onto whichever segment is chosen, in the same update.
 
 ### Release VLAN
 ```
 POST /api/release-vlan {cluster_name, site} → AllocationService.release_vlan()
-  → release_segment(): clears the segment's cluster and returns it to the pool
+  → release_segment(): clears the segment's cluster and type and returns it to the pool
 ```
 
 ---

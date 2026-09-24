@@ -230,11 +230,6 @@ svg {
     font-weight: 700;
     letter-spacing: -0.01em;
 }
-.brand__subtitle {
-    font-size: 0.74rem;
-    color: var(--text-muted);
-    font-weight: 500;
-}
 
 .app-header__actions {
     margin-left: auto;
@@ -369,66 +364,64 @@ svg {
 .stat-card__site .icon {
     color: var(--primary);
 }
-/* ---- Per-type usage (site cards) ------------------------------------------ */
-.types {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-3);
+/* ---- Allocated-per-type counts (site cards) ------------------------------- */
+.stat-card {
+    container-type: inline-size;
 }
-.trow {
+.stat-card__used.is-full {
+    color: var(--danger-text);
+}
+.type-counts {
     display: grid;
-    grid-template-columns: 92px 1fr auto;
-    align-items: center;
-    gap: var(--space-3);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-2);
 }
-.tname {
+.type-count {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    min-width: 0;
+}
+.type-count__name {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    min-width: 0;
     font-size: 0.74rem;
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.04em;
-    color: var(--type-c, var(--text-muted));
+    color: var(--text-muted);
 }
-.tbar {
-    height: 7px;
-    background: var(--track);
-    border-radius: var(--radius-pill);
-    overflow: hidden;
+/* Identity rides on the dot; the text stays in text ink. */
+.type-dot {
+    flex: none;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--type-c, var(--text-faint));
 }
-.tbar__fill {
-    height: 100%;
-    border-radius: inherit;
-    background: var(--type-c, var(--brand-500));
-    transition: width 500ms var(--ease);
-}
-.tbar__fill.is-high {
-    background: linear-gradient(90deg, var(--warn-500), var(--danger-500));
-}
-.tbar__fill.is-empty {
-    background: transparent;
-}
-.tcount {
+.type-count__value {
     font-family: var(--font-mono);
     font-variant-numeric: tabular-nums;
-    font-size: 0.85rem;
+    font-size: 0.95rem;
     font-weight: 700;
-    letter-spacing: -0.01em;
-    min-width: 52px;
-    text-align: right;
+    color: var(--text);
 }
-.tcount .den {
+.type-count.is-idle .type-count__value {
     color: var(--text-faint);
     font-weight: 500;
 }
-.tcount.is-full {
-    color: var(--danger-text);
-}
-.tcount.is-idle {
-    color: var(--text-faint);
-}
-.types-empty {
-    font-size: 0.82rem;
-    color: var(--text-faint);
-    padding: var(--space-2) 0;
+/* A card at the grid's 260px minimum is too narrow for "INVENTORY" and its
+   count side by side in half the card — stack the counts instead. */
+@container (max-width: 240px) {
+    .type-counts {
+        grid-template-columns: 1fr;
+    }
 }
 
 /* ---- Segments panel ------------------------------------------------------- */
@@ -1117,206 +1110,6 @@ td.copyable:focus-visible .copyable__icon {
     }
 }
 
-/* ---- Help page ------------------------------------------------------------ */
-.doc {
-    max-width: 900px;
-    margin: 0 auto;
-    padding: var(--space-6) var(--space-5) var(--space-7);
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-5);
-}
-.doc h1 {
-    font-size: 1.6rem;
-    font-weight: 800;
-    letter-spacing: -0.02em;
-    display: flex;
-    align-items: center;
-    gap: var(--space-3);
-}
-.doc-toc {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-lg);
-    padding: var(--space-4) var(--space-5);
-    box-shadow: var(--shadow-sm);
-}
-.doc-toc h2 {
-    font-size: 0.8rem;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--text-muted);
-    margin-bottom: var(--space-3);
-}
-.doc-toc ul {
-    list-style: none;
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-    gap: var(--space-1);
-}
-.doc-toc a {
-    display: block;
-    padding: 6px 10px;
-    border-radius: var(--radius-sm);
-    color: var(--text);
-    font-weight: 500;
-    font-size: 0.9rem;
-    transition: background var(--dur) var(--ease);
-}
-.doc-toc a:hover {
-    background: var(--surface-hover);
-    text-decoration: none;
-}
-
-.doc-section {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-sm);
-    padding: var(--space-5) var(--space-5) var(--space-5);
-    scroll-margin-top: 80px;
-}
-.doc-section > h2 {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-    font-size: 1.2rem;
-    font-weight: 700;
-    letter-spacing: -0.01em;
-    margin-bottom: var(--space-4);
-    padding-bottom: var(--space-3);
-    border-bottom: 1px solid var(--border);
-}
-.doc-section > h2 .icon {
-    color: var(--primary);
-}
-.doc-section h3 {
-    font-size: 1rem;
-    font-weight: 700;
-    margin: var(--space-5) 0 var(--space-2);
-}
-.doc-section h4 {
-    font-size: 0.92rem;
-    font-weight: 700;
-    margin: var(--space-4) 0 var(--space-1);
-}
-.doc-section p {
-    color: var(--text);
-    margin: var(--space-2) 0;
-}
-.doc-section ul,
-.doc-section ol {
-    padding-left: var(--space-5);
-    margin: var(--space-2) 0;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-}
-.doc-section li {
-    color: var(--text);
-}
-.doc-section code {
-    font-family: var(--font-mono);
-    font-size: 0.85em;
-    background: var(--surface-2);
-    border: 1px solid var(--border);
-    padding: 1px 6px;
-    border-radius: 5px;
-    color: var(--primary);
-}
-
-.code-block {
-    font-family: var(--font-mono);
-    font-size: 0.82rem;
-    line-height: 1.6;
-    background: var(--surface-2);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    padding: var(--space-4);
-    margin: var(--space-3) 0;
-    overflow-x: auto;
-    white-space: pre;
-    color: var(--text);
-    tab-size: 2;
-}
-
-.endpoint {
-    display: flex;
-    align-items: baseline;
-    flex-wrap: wrap;
-    gap: var(--space-2);
-    background: var(--surface-2);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    padding: var(--space-3) var(--space-4);
-    margin: var(--space-2) 0;
-}
-.endpoint__path {
-    font-family: var(--font-mono);
-    font-weight: 600;
-    font-size: 0.85rem;
-}
-.endpoint__desc {
-    color: var(--text-muted);
-    font-size: 0.85rem;
-}
-.method {
-    display: inline-block;
-    font-family: var(--font-mono);
-    font-size: 0.7rem;
-    font-weight: 700;
-    letter-spacing: 0.03em;
-    padding: 2px 8px;
-    border-radius: var(--radius-sm);
-    color: #fff;
-}
-.method.get {
-    background: #2563eb;
-}
-.method.post {
-    background: #16a34a;
-}
-.method.put {
-    background: #d97706;
-}
-.method.patch {
-    background: #9333ea;
-}
-.method.delete {
-    background: #dc2626;
-}
-
-.callout {
-    display: flex;
-    gap: var(--space-3);
-    background: var(--warn-bg);
-    border: 1px solid transparent;
-    border-left: 4px solid var(--warn-500);
-    border-radius: var(--radius-md);
-    padding: var(--space-3) var(--space-4);
-    margin: var(--space-3) 0;
-    color: var(--warn-text);
-    font-size: 0.88rem;
-}
-.callout .icon {
-    color: var(--warn-500);
-    flex-shrink: 0;
-}
-.callout strong {
-    color: var(--text);
-}
-
-.doc-section .example {
-    background: var(--surface-2);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    padding: var(--space-3) var(--space-4);
-    margin: var(--space-3) 0;
-}
-.doc-section .example h4 {
-    margin-top: 0;
-}
-
 /* ---- Motion preferences --------------------------------------------------- */
 @media (prefers-reduced-motion: reduce) {
     *,
@@ -1348,9 +1141,6 @@ td.copyable:focus-visible .copyable__icon {
     }
     .app-header__inner {
         padding: var(--space-3) var(--space-4);
-    }
-    .brand__subtitle {
-        display: none;
     }
     .panel__head {
         gap: var(--space-3);

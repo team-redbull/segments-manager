@@ -15,7 +15,6 @@ from ...database import (
     update_segment as _update_segment,
     allocate_segment as _allocate_segment,
 )
-from ..time_utils import get_current_utc
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +36,7 @@ class AllocationUtils:
 
     @staticmethod
     async def find_and_allocate_segment(site: str, cluster_name: str, type: str) -> Optional[Dict[str, Any]]:
-        """Atomically find and allocate an available segment of a type for a site."""
+        """Atomically allocate any available segment at a site as the given type."""
         logger.info(f"Allocating from site={site}, type={type}")
         t1 = time.time()
         result = await _allocate_segment(
@@ -53,23 +52,15 @@ class AllocationUtils:
         return segments[0] if segments else None
 
     @staticmethod
-    async def allocate_segment(segment_id: str, cluster_name: str) -> bool:
-        """Allocate a segment to a cluster (kept for backward compatibility)."""
-        allocation_time = get_current_utc()
-        return await _update_segment(segment_id, {
-            "status": STATUS_ALLOCATED,
-            "cluster_name": cluster_name,
-            "allocated_at": allocation_time,
-        })
-
-    @staticmethod
     async def release_segment(segment_id: str) -> bool:
         """Release an allocated segment by id (Allocated -> Available).
 
         Callers resolve the segment from its CIDR first, so there is no cluster
-        matching to do here.
+        matching to do here. The type goes with the cluster: it was stamped on
+        at allocation, and an Available segment has none.
         """
         return await _update_segment(segment_id, {
             "status": STATUS_AVAILABLE,
+            "type": None,
             "cluster_name": None,
         })

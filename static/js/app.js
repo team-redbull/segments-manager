@@ -448,56 +448,50 @@ async function loadSites() {
 
 // ---- Stats -----------------------------------------------------------------
 function statSkeleton() {
-    const row = `
-        <div class="trow">
-            <span class="skeleton" style="height:12px"></span>
-            <span class="skeleton" style="height:7px;border-radius:999px"></span>
-            <span class="skeleton" style="width:48px;height:12px"></span>
+    const cell = `
+        <div class="type-count">
+            <span class="skeleton" style="width:56px;height:12px"></span>
+            <span class="skeleton" style="width:14px;height:14px"></span>
         </div>`;
     return `
         <div class="stat-card">
             <div class="stat-card__head">
                 <span class="skeleton" style="width:90px;height:16px"></span>
+                <span class="skeleton" style="width:72px;height:18px;border-radius:999px"></span>
             </div>
-            <div class="types">${row.repeat(3)}</div>
+            <div class="type-counts">${cell.repeat(4)}</div>
         </div>`;
 }
 
 // Maps a segment type to its accent class, which sets --type-c in CSS
-// (used by the table type badge and the sites-summary rows).
+// (used by the table type badge and the site cards' type dots).
 function typeClass(type) {
     return type ? "type-" + String(type).toLowerCase() : "";
 }
 
-// Renders the per-type usage rows for one site: allocated out of total per type.
-function renderTypeUsage(stat) {
-    const types = (stat.by_type || []).filter((t) => Number(t.total) > 0);
-    if (types.length === 0) {
-        return '<div class="types-empty">No HC / MCE / INVENTORY / PXE segments</div>';
-    }
-    const rows = types
+// The site card's header badge: segments in use out of the site's total.
+function renderUsedBadge(stat) {
+    const allocated = Number(stat.allocated) || 0;
+    const total = Number(stat.total_segments) || 0;
+    const full = total > 0 && allocated >= total;
+    return `<span class="panel__count stat-card__used ${full ? "is-full" : ""}" title="${allocated} of ${total} segments allocated">${allocated} / ${total} used</span>`;
+}
+
+// One site's allocated segments per type — plain counts, never "x of y": an
+// Available segment has no type, so a type has no total of its own. Every type
+// is listed, zeros included, so the cards line up across sites.
+function renderTypeCounts(stat) {
+    const cells = (stat.by_type || [])
         .map((t) => {
-            const allocated = Number(t.allocated) || 0;
-            const total = Number(t.total) || 0;
-            const pct = total > 0 ? Math.round((allocated / total) * 100) : 0;
-            const full = total > 0 && allocated >= total;
-            const idle = allocated === 0;
-            const high = pct >= 85;
-            const fillClass = high ? "is-high" : idle ? "is-empty" : "";
-            const countClass = full ? "is-full" : idle ? "is-idle" : "";
+            const count = Number(t.allocated) || 0;
             return `
-                <div class="trow ${typeClass(t.type)}">
-                    <span class="tname">${escapeHTML(t.type)}</span>
-                    <div class="tbar" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100" aria-label="${escapeHTML(
-                t.type
-            )} usage">
-                        <div class="tbar__fill ${fillClass}" style="width:${pct}%"></div>
-                    </div>
-                    <span class="tcount ${countClass}">${allocated}<span class="den">/${total}</span></span>
+                <div class="type-count ${typeClass(t.type)} ${count === 0 ? "is-idle" : ""}">
+                    <span class="type-count__name"><span class="type-dot" aria-hidden="true"></span>${escapeHTML(t.type)}</span>
+                    <span class="type-count__value">${count}</span>
                 </div>`;
         })
         .join("");
-    return `<div class="types">${rows}</div>`;
+    return `<div class="type-counts" aria-label="Allocated segments per type">${cells}</div>`;
 }
 
 async function loadStats(showSkeleton = false) {
@@ -526,9 +520,9 @@ async function loadStats(showSkeleton = false) {
                         <div class="stat-card__site">${ICONS.server}<span>${escapeHTML(
                     stat.site
                 )}</span></div>
-                        <span class="panel__count">${formatSegmentCount(stat.total_segments)}</span>
+                        ${renderUsedBadge(stat)}
                     </div>
-                    ${renderTypeUsage(stat)}
+                    ${renderTypeCounts(stat)}
                 </article>`;
             })
             .join("");

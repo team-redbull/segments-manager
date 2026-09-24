@@ -112,11 +112,12 @@ async def create_segment(document: Dict[str, Any]) -> Dict[str, Any]:
     """Insert a new segment document and return the created segment."""
     col = get_segments_collection()
     doc = {k: v for k, v in document.items() if k != "_id"}
-    doc.setdefault("type", "HC")
     doc.setdefault("dhcp", True)
+    # A new segment is immediately usable: Available -> Allocated -> Available.
+    # Type is allocation state like cluster_name — none until allocated.
+    doc.setdefault("type", None)
     doc.setdefault("cluster_name", None)
     doc.setdefault("allocated_at", None)
-    # A new segment is immediately usable: Available -> Allocated -> Available.
     doc.setdefault("status", STATUS_AVAILABLE)
 
     result = await col.insert_one(doc)
@@ -138,49 +139,6 @@ async def update_segment(segment_id: str, updates: Dict[str, Any]) -> bool:
     return False
 
 
-async def convert_segment_type(
-    segment_value: str,
-    converted_state: Dict[str, Any],
-    allowed_from_types: Optional[List[str]] = None,
-) -> Optional[Dict[str, Any]]:
-    """Atomically convert a segment's type, returning the PRE-update document.
-
-    The whole guard lives in the filter, exactly like allocate_segment above:
-    the segment must be Available AND unassigned, and — when allowed_from_types
-    is given — must still carry one of the types the caller is allowed to
-    convert FROM. A read-then-write cannot express this. Two conversions racing
-    for one segment both read the old type, both pass the check and both write,
-    so both callers are told they won while only the last write survives.
-
-    Available AND unassigned, not merely "not Allocated": a segment carrying a
-    cluster_name is in use whatever its status says, and re-typing it would
-    change what that cluster runs on underneath it.
-
-    Returns None when nothing matched; the caller reads the segment back to
-    tell 404 / in-use / lost-the-race apart.
-    """
-    from pymongo import ReturnDocument
-
-    col = get_segments_collection()
-    query: Dict[str, Any] = {
-        "segment": segment_value,
-        "status": STATUS_AVAILABLE,
-        "cluster_name": {"$in": [None, ""]},
-    }
-    if allowed_from_types is not None:
-        query["type"] = {"$in": allowed_from_types}
-
-    doc = await col.find_one_and_update(
-        query,
-        {"$set": {k: v for k, v in converted_state.items() if k != "_id"}},
-        return_document=ReturnDocument.BEFORE,
-    )
-    if doc:
-        invalidate_cache(CACHE_KEY_SEGMENTS)
-        return _doc_to_segment(doc)
-    return None
-
-
 async def delete_segment(segment_id: str) -> bool:
     """Delete a segment by ID. Returns True if a document was deleted."""
     oid = _to_object_id(segment_id)
@@ -198,8 +156,12 @@ async def allocate_segment(
     type: str,
     sort_by_vlan_id: bool = True,
 ) -> Optional[Dict[str, Any]]:
-    """Atomically find an available segment of the given type for the given site
-    and mark it allocated.
+    """Atomically find an available segment at the given site, mark it
+    allocated, and stamp it with the requested type.
+
+    Available segments carry no type, so `type` does not narrow the search —
+    any Available segment at the site qualifies, and it BECOMES that type in
+    the same update that allocates it (release clears it again).
 
     Uses find_one_and_update for true atomicity — unlike the previous two-step
     find-then-update approach, concurrent callers cannot receive the same segment.
@@ -210,13 +172,13 @@ async def allocate_segment(
 
     query = {
         "site": {"$regex": f"^{site}$", "$options": "i"},
-        "type": {"$regex": f"^{type}$", "$options": "i"},
         "status": STATUS_AVAILABLE,
     }
     sort = [("vlan_id", 1)] if sort_by_vlan_id else None
     update = {
         "$set": {
             "status": STATUS_ALLOCATED,
+            "type": type,
             "cluster_name": cluster_name,
             "allocated_at": datetime.now(timezone.utc),
         }

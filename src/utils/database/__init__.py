@@ -23,14 +23,12 @@ class DatabaseUtils:
     find_existing_allocation = staticmethod(AllocationUtils.find_existing_allocation)
     find_and_allocate_segment = staticmethod(AllocationUtils.find_and_allocate_segment)
     find_available_segment = staticmethod(AllocationUtils.find_available_segment)
-    allocate_segment = staticmethod(AllocationUtils.allocate_segment)
     release_segment = staticmethod(AllocationUtils.release_segment)
 
     # CRUD operations
     create_segment = staticmethod(SegmentCRUD.create_segment)
     get_segment_by_segment = staticmethod(SegmentCRUD.get_segment_by_segment)
     update_segment_by_id = staticmethod(SegmentCRUD.update_segment_by_id)
-    convert_segment_type = staticmethod(SegmentCRUD.convert_segment_type)
     delete_segment_by_id = staticmethod(SegmentCRUD.delete_segment_by_id)
 
     # Query operations
