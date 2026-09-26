@@ -95,7 +95,7 @@ Collection **`segments`**:
 | `segment` | str | CIDR, e.g. `192.168.1.0/24` |
 | `dhcp` | bool | |
 | `description` | str | |
-| `type` | str \| None | `MCE`/`INVENTORY`/`HC`/`PXE` — set by allocation, `None` while Available |
+| `type` | str \| None | `MCE`/`INVENTORY_REDFISH`/`INVENTORY_IPMI`/`HC`/`PXE` — set by allocation, `None` while Available |
 | `cluster_name` | str \| None | `None` = available; one cluster name (never a list) |
 | `allocated_at` | datetime \| None | |
 
