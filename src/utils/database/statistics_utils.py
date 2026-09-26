@@ -4,17 +4,29 @@ Handles calculation of site statistics and utilization metrics.
 """
 
 import logging
-from typing import Dict, Any, List
+from typing import Dict, Any, List, get_args
 
 from ...database import get_segments, STATUS_AVAILABLE, STATUS_ALLOCATED
 from ...config.settings import SITES
+from ...models.schemas import SegmentType
 
 logger = logging.getLogger(__name__)
 
 # Segment types in the per-site allocation breakdown, in display order. Every
 # SegmentType is listed: a type missing here would have its allocations
 # silently absent from the site cards while still counted in the site total.
-DISPLAY_TYPES = ["HC", "MCE", "INVENTORY", "PXE"]
+#
+# Kept as its own list rather than derived from SegmentType because the ORDER
+# here is a display choice, not the declaration order. The assertion below is
+# what makes the "every type is listed" rule hold anyway: adding a type without
+# adding it here fails at import, not in a silently wrong site card.
+DISPLAY_TYPES = ["HC", "MCE", "INVENTORY_REDFISH", "INVENTORY_IPMI", "PXE"]
+
+assert set(DISPLAY_TYPES) == set(get_args(SegmentType)), (
+    "DISPLAY_TYPES must cover every SegmentType exactly: "
+    f"missing {sorted(set(get_args(SegmentType)) - set(DISPLAY_TYPES))}, "
+    f"unknown {sorted(set(DISPLAY_TYPES) - set(get_args(SegmentType)))}"
+)
 
 
 class StatisticsUtils:

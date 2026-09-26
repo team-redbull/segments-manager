@@ -193,7 +193,8 @@ class TestSegmentValidation:
 
 
 # ---------------------------------------------------------------------------
-# Segment type (MCE / INVENTORY / HC / PXE) — allocation state, not identity
+# Segment type (MCE / INVENTORY_REDFISH / INVENTORY_IPMI / HC / PXE) —
+# allocation state, not identity
 # ---------------------------------------------------------------------------
 def _get_segment(cidr):
     return requests.get(f"{API}/segments/by-segment", params={"segment": cidr},
@@ -224,7 +225,10 @@ class TestSegmentType:
                             segment=cidr_for("site1", v))
         assert r.status_code == 422  # extra="forbid"
 
-    @pytest.mark.parametrize("seg_type", ["MCE", "INVENTORY", "HC", "PXE"])
+    @pytest.mark.parametrize(
+        "seg_type",
+        ["MCE", "INVENTORY_REDFISH", "INVENTORY_IPMI", "HC", "PXE"],
+    )
     def test_allocation_stamps_the_type_and_release_clears_it(
         self, segment_factory, release_allocated, seg_type
     ):
@@ -532,7 +536,9 @@ class TestStats:
         for s in stats:
             assert set(s) == {"site", "total_segments", "allocated", "by_type"}
             assert 0 <= s["allocated"] <= s["total_segments"]
-            assert [t["type"] for t in s["by_type"]] == ["HC", "MCE", "INVENTORY", "PXE"]
+            assert [t["type"] for t in s["by_type"]] == [
+                "HC", "MCE", "INVENTORY_REDFISH", "INVENTORY_IPMI", "PXE"
+            ]
             for entry in s["by_type"]:
                 assert set(entry) == {"type", "allocated"}
             assert sum(t["allocated"] for t in s["by_type"]) == s["allocated"]

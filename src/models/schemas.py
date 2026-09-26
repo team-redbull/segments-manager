@@ -2,7 +2,21 @@ from typing import Optional, Literal
 from datetime import datetime
 from pydantic import BaseModel, Field, model_validator
 
-SegmentType = Literal["MCE", "INVENTORY", "HC", "PXE"]
+# INVENTORY is split by how a bare-metal server's BMC is DRIVEN, because an
+# MCE's inventory network is: Ironic reaches a Redfish BMC (HP OneView, Dell
+# OpenManage's iDRAC, Cisco Intersight) on one network and a UCS-managed blade
+# over IPMI on another, so one MCE holds up to two inventory allocations. They
+# are separate TYPES rather than one INVENTORY with a marker because allocation
+# is already idempotent per (cluster_name, site, type) — which is exactly the
+# "one per class per cluster" rule, for free, with no new scoping anywhere.
+#
+# There is deliberately NO plain INVENTORY. An allocation naming no class
+# serves neither kind of BMC while reading as "inventory, sorted out" on a site
+# card, so the ambiguity would sit in the data rather than be caught. Any
+# allocation still carrying it must be released and re-allocated as one of the
+# two: the Literal rejects the value, so a stored "INVENTORY" fails response
+# validation rather than being quietly served.
+SegmentType = Literal["MCE", "INVENTORY_REDFISH", "INVENTORY_IPMI", "HC", "PXE"]
 
 
 class Segment(BaseModel):
