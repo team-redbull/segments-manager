@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 # here is a display choice, not the declaration order. The assertion below is
 # what makes the "every type is listed" rule hold anyway: adding a type without
 # adding it here fails at import, not in a silently wrong site card.
-DISPLAY_TYPES = ["HC", "MCE", "INVENTORY", "PXE"]
+DISPLAY_TYPES = ["HC", "MCE", "INVENTORY", "PXE", "UPI", "HUB"]
 
 assert set(DISPLAY_TYPES) == set(get_args(SegmentType)), (
     "DISPLAY_TYPES must cover every SegmentType exactly: "

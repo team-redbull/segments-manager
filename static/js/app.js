@@ -478,19 +478,21 @@ function renderUsedBadge(stat) {
 }
 
 // One site's allocated segments per type — plain counts, never "x of y": an
-// Available segment has no type, so a type has no total of its own. Every type
-// is listed, zeros included, so the cards line up across sites.
+// Available segment has no type, so a type has no total of its own. Only types
+// with at least one allocation are listed; /api/stats still returns every type.
 function renderTypeCounts(stat) {
     const cells = (stat.by_type || [])
-        .map((t) => {
-            const count = Number(t.allocated) || 0;
-            return `
-                <div class="type-count ${typeClass(t.type)} ${count === 0 ? "is-idle" : ""}">
+        .map((t) => ({ type: t.type, count: Number(t.allocated) || 0 }))
+        .filter((t) => t.count > 0)
+        .map(
+            (t) => `
+                <div class="type-count ${typeClass(t.type)}">
                     <span class="type-count__name"><span class="type-dot" aria-hidden="true"></span>${escapeHTML(t.type)}</span>
-                    <span class="type-count__value">${count}</span>
-                </div>`;
-        })
+                    <span class="type-count__value">${t.count}</span>
+                </div>`
+        )
         .join("");
+    if (!cells) return '<p class="type-counts__empty">No allocated segments</p>';
     return `<div class="type-counts" aria-label="Allocated segments per type">${cells}</div>`;
 }
 

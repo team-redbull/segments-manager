@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field, model_validator
 # wanted to maintain. A caller identifies an MCE's inventory network by its
 # CLUSTER NAME alone, which the (cluster_name, site, type) allocation
 # idempotency already makes unique.
-SegmentType = Literal["MCE", "INVENTORY", "HC", "PXE"]
+SegmentType = Literal["MCE", "INVENTORY", "HC", "PXE", "UPI", "HUB"]
 
 
 class Segment(BaseModel):

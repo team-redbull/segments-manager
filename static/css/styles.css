@@ -94,6 +94,8 @@
     --type-mce: #a3e635;
     --type-inventory: #f472b6;
     --type-pxe: #a78bfa;
+    --type-upi: #e879f9;
+    --type-hub: #22d3ee;
 
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
     --shadow-md: 0 6px 18px rgba(0, 0, 0, 0.4);
@@ -412,9 +414,9 @@ svg {
     font-weight: 700;
     color: var(--text);
 }
-.type-count.is-idle .type-count__value {
+.type-counts__empty {
+    font-size: 0.8rem;
     color: var(--text-faint);
-    font-weight: 500;
 }
 /* A card at the grid's 260px minimum is too narrow for "INVENTORY" and its
    count side by side in half the card — stack the counts instead. */
@@ -993,6 +995,8 @@ td.copyable:focus-visible .copyable__icon {
 .type-mce { --type-c: var(--type-mce); }
 .type-inventory { --type-c: var(--type-inventory); }
 .type-pxe { --type-c: var(--type-pxe); }
+.type-upi { --type-c: var(--type-upi); }
+.type-hub { --type-c: var(--type-hub); }
 
 /* Empty / error states */
 .state-cell {
