@@ -10,6 +10,13 @@ let currentSearchQuery = "";
 let isOnline = true;
 let allSites = [];
 
+// A UPI segment may be shared, so its cluster_name is a list; every other
+// segment has a single name (or null while Available).
+function clusterLabel(segment) {
+    const clusters = segment.cluster_name;
+    return Array.isArray(clusters) ? clusters.join(", ") : clusters || "";
+}
+
 function quickSearchMatches(segment, needle) {
     const hay = (value) => String(value ?? "").toLowerCase();
     return (
@@ -17,7 +24,7 @@ function quickSearchMatches(segment, needle) {
         hay(segment.vlan_id).includes(needle) ||
         hay(segment.epg_name).includes(needle) ||
         hay(segment.segment).includes(needle) ||
-        hay(segment.cluster_name).includes(needle)
+        hay(clusterLabel(segment)).includes(needle)
     );
 }
 
@@ -72,7 +79,7 @@ function columnFilterValue(segment, col) {
         case "status":
             return segmentStatusLabel(segment);
         case "cluster":
-            return segment.cluster_name || "";
+            return clusterLabel(segment);
         default:
             return segment[col] === null || segment[col] === undefined ? "" : String(segment[col]);
     }
@@ -600,8 +607,8 @@ function compareSegments(a, b, column, direction) {
             bv = b.dhcp ? 1 : 0;
             break;
         case "cluster":
-            av = (a.cluster_name || "").toLowerCase();
-            bv = (b.cluster_name || "").toLowerCase();
+            av = clusterLabel(a).toLowerCase();
+            bv = clusterLabel(b).toLowerCase();
             break;
         case "status":
             av = segmentStatusLabel(a).toLowerCase();
@@ -704,8 +711,8 @@ async function loadSegments(showSkeleton = false, fresh = false) {
                         dhcp ? "dhcp-on" : ""
                     }">${dhcp ? "On" : "Off"}</span></td>
                     <td data-col="cluster">${
-                        segment.cluster_name
-                            ? escapeHTML(segment.cluster_name)
+                        clusterLabel(segment)
+                            ? escapeHTML(clusterLabel(segment))
                             : '<span class="cell-muted">—</span>'
                     }</td>
                     <td data-col="status"><span class="badge ${statusClass}">${statusLabel}</span></td>

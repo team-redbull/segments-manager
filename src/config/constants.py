@@ -12,6 +12,12 @@ class CacheTTL:
     LONG = 3600      # 1 hour - for rarely changing data
 
 
+# The one segment type several clusters may share. A UPI segment's
+# `cluster_name` is stored and served as a LIST of cluster names; every other
+# type holds exactly one cluster, as a plain string.
+MULTI_CLUSTER_TYPE = "UPI"
+
+
 class VLANConstraints:
     """VLAN ID constraints"""
     MIN_ID = 1

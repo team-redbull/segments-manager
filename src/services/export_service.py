@@ -6,6 +6,7 @@ import pandas as pd
 from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
 
+from ..database import segment_clusters
 from ..utils.database_utils import DatabaseUtils
 from ..utils.error_handlers import handle_db_errors, retry_on_network_error
 from ..utils.logging_decorators import log_operation_timing
@@ -35,7 +36,7 @@ class ExportService:
                 'EPG Name': segment.get('epg_name', ''),
                 'Segment': segment.get('segment', ''),
                 'DHCP': 'Yes' if segment.get('dhcp', False) else 'No',
-                'Cluster Name': segment.get('cluster_name', '') if segment.get('cluster_name') else 'Available',
+                'Cluster Name': ', '.join(segment_clusters(segment)) or 'Available',
                 'Allocated At': segment.get('allocated_at', ''),
                 'Status': segment.get('status', '')
             })

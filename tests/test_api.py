@@ -385,8 +385,8 @@ class TestSegmentCRUD:
         assert got["type"] == "MCE"
         assert got["status"] == "Allocated"
 
-        # a comma-separated list is no longer a valid cluster name — shared
-        # segments were retired, one segment belongs to at most one cluster
+        # a comma-separated list is not a valid cluster name — every type
+        # but UPI belongs to exactly one cluster
         shared = requests.put(f"{API}/segments/clusters",
                               json={"segment": seg, "cluster_name": "shared-a,shared-b",
                                     "type": "MCE"},
@@ -419,6 +419,140 @@ class TestSegmentCRUD:
         # single-segment routes are keyed by CIDR now; the /segments/{id} path is gone
         assert requests.get(f"{API}/segments/deadbeefdeadbeefdeadbeef",
                             timeout=TIMEOUT).status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# UPI — the one segment type several clusters may share (cluster_name is a list)
+# ---------------------------------------------------------------------------
+def _put_clusters(seg, cluster_name, seg_type=None):
+    body = {"segment": seg, "cluster_name": cluster_name}
+    if seg_type is not None:
+        body["type"] = seg_type
+    return requests.put(f"{API}/segments/clusters", json=body,
+                        headers=AUTH_HEADERS, timeout=TIMEOUT)
+
+
+def _release(seg, cluster_name=None):
+    body = {"segment": seg}
+    if cluster_name is not None:
+        body["cluster_name"] = cluster_name
+    return requests.post(f"{API}/segments/release", json=body,
+                         headers=AUTH_HEADERS, timeout=TIMEOUT)
+
+
+class TestUpiMultiCluster:
+    def _upi_segment(self, segment_factory, release_allocated, clusters):
+        v = next_vlan()
+        seg = cidr_for("site1", v)
+        assert segment_factory(site="site1", vlan_id=v, epg_name=_uid(), segment=seg).status_code == 200
+        r = _put_clusters(seg, clusters, "UPI")
+        assert r.status_code == 200, r.text
+        release_allocated(seg)
+        return seg
+
+    def test_put_assigns_a_list_and_replaces_it(self, segment_factory, release_allocated):
+        a, b, c = (f"it-upi-{uuid.uuid4().hex[:6]}" for _ in range(3))
+        seg = self._upi_segment(segment_factory, release_allocated, [a, b])
+        got = _get_segment(seg)
+        assert got["cluster_name"] == [a, b]
+        assert got["type"] == "UPI"
+        assert got["status"] == "Allocated"
+
+        # PUT replaces: the list sent is the new list (append = old list + new)
+        assert _put_clusters(seg, [a, b, c], "UPI").status_code == 200
+        assert _get_segment(seg)["cluster_name"] == [a, b, c]
+        assert _put_clusters(seg, [c], "UPI").status_code == 200
+        assert _get_segment(seg)["cluster_name"] == [c]
+
+    def test_put_single_name_for_upi_is_stored_as_a_list(self, segment_factory, release_allocated):
+        a = f"it-upi-{uuid.uuid4().hex[:6]}"
+        seg = self._upi_segment(segment_factory, release_allocated, a)
+        assert _get_segment(seg)["cluster_name"] == [a]
+
+    def test_put_list_dedupes_and_validates_names(self, segment_factory, release_allocated):
+        a = f"it-upi-{uuid.uuid4().hex[:6]}"
+        seg = self._upi_segment(segment_factory, release_allocated, [a, f" {a} ", ""])
+        assert _get_segment(seg)["cluster_name"] == [a]
+        assert _put_clusters(seg, [a, "bad name!"], "UPI").status_code == 400
+
+    def test_list_refused_for_other_types(self, segment_factory):
+        v = next_vlan()
+        seg = cidr_for("site1", v)
+        assert segment_factory(site="site1", vlan_id=v, epg_name=_uid(), segment=seg).status_code == 200
+        r = _put_clusters(seg, ["it-a", "it-b"], "MCE")
+        assert r.status_code == 422, r.text
+        assert _get_segment(seg)["status"] == "Available"
+
+    def test_empty_list_releases(self, segment_factory, release_allocated):
+        seg = self._upi_segment(segment_factory, release_allocated, ["it-upi-a", "it-upi-b"])
+        assert _put_clusters(seg, []).status_code == 200
+        got = _get_segment(seg)
+        assert (got["status"], got["cluster_name"], got["type"]) == ("Available", None, None)
+
+    def test_release_one_cluster_then_the_last(self, segment_factory, release_allocated):
+        a, b = (f"it-upi-{uuid.uuid4().hex[:6]}" for _ in range(2))
+        seg = self._upi_segment(segment_factory, release_allocated, [a, b])
+
+        r = _release(seg, a)
+        assert r.status_code == 200, r.text
+        got = _get_segment(seg)
+        assert got["cluster_name"] == [b]
+        assert got["status"] == "Allocated"
+        assert got["type"] == "UPI"
+
+        # idempotent: a cluster no longer on the segment is a no-op
+        assert _release(seg, a).status_code == 200
+        assert _get_segment(seg)["cluster_name"] == [b]
+
+        # the last cluster out returns the segment to the pool
+        assert _release(seg, b).status_code == 200
+        got = _get_segment(seg)
+        assert (got["status"], got["cluster_name"], got["type"]) == ("Available", None, None)
+
+    def test_release_by_cidr_alone_frees_every_cluster(self, segment_factory, release_allocated):
+        seg = self._upi_segment(segment_factory, release_allocated, ["it-upi-a", "it-upi-b"])
+        assert _release(seg).status_code == 200
+        got = _get_segment(seg)
+        assert (got["status"], got["cluster_name"], got["type"]) == ("Available", None, None)
+
+    def test_release_with_cluster_refused_for_other_types(self, segment_factory, release_allocated):
+        v = next_vlan()
+        seg = cidr_for("site1", v)
+        assert segment_factory(site="site1", vlan_id=v, epg_name=_uid(), segment=seg).status_code == 200
+        assert _put_clusters(seg, "it-mce", "MCE").status_code == 200
+        release_allocated(seg)
+        r = _release(seg, "it-mce")
+        assert r.status_code == 400, r.text
+        assert _get_segment(seg)["status"] == "Allocated"
+
+    def test_allocate_upi_returns_a_list_and_finds_shared_membership(
+        self, segment_factory, release_allocated
+    ):
+        v = next_vlan()
+        assert segment_factory(site="site1", vlan_id=v, epg_name=_uid(),
+                               segment=cidr_for("site1", v)).status_code == 200
+        a, b = (f"it-upi-{uuid.uuid4().hex[:6]}" for _ in range(2))
+
+        r = _allocate(a, "UPI")
+        assert r.status_code == 200, r.text
+        seg = r.json()["segment"]
+        release_allocated(seg)
+        assert r.json()["cluster_name"] == [a]
+
+        # once b shares it, allocating for b is idempotent and returns it
+        assert _put_clusters(seg, [a, b], "UPI").status_code == 200
+        again = _allocate(b, "UPI")
+        assert again.status_code == 200, again.text
+        assert again.json()["segment"] == seg
+        assert again.json()["cluster_name"] == [a, b]
+
+    def test_search_finds_each_member(self, segment_factory, release_allocated):
+        a, b = (f"it-upi-{uuid.uuid4().hex[:6]}" for _ in range(2))
+        seg = self._upi_segment(segment_factory, release_allocated, [a, b])
+        for name in (a, b):
+            hits = requests.get(f"{API}/segments/search", params={"q": name, "status": "Allocated"},
+                                timeout=TIMEOUT).json()
+            assert [h["segment"] for h in hits] == [seg]
 
 
 # ---------------------------------------------------------------------------

@@ -96,7 +96,7 @@ Collection **`segments`**:
 | `dhcp` | bool | |
 | `description` | str | |
 | `type` | str \| None | `MCE`/`INVENTORY`/`HC`/`PXE`/`UPI`/`HUB` — set by allocation, `None` while Available |
-| `cluster_name` | str \| None | `None` = available; one cluster name (never a list) |
+| `cluster_name` | str \| list[str] \| None | `None` = available; one cluster name — a list for `UPI`, the one type several clusters may share |
 | `allocated_at` | datetime \| None | |
 
 **Indexes** (`init_storage()`):
@@ -132,8 +132,10 @@ POST /api/segments/allocate {cluster_name, site, type} → AllocationService.all
 
 ### Release VLAN
 ```
-POST /api/release-vlan {cluster_name, site} → AllocationService.release_vlan()
-  → release_segment(): clears the segment's cluster and type and returns it to the pool
+POST /api/segments/release {segment, cluster_name?} → AllocationService.release_segment()
+  → no cluster_name: clears the segment's cluster(s) and type and returns it to the pool
+  → cluster_name (UPI only): $pull that one cluster; the segment returns to the pool
+    when its last cluster leaves
 ```
 
 ---

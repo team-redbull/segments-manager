@@ -6,7 +6,7 @@ Initialisation, index creation, migration, and shutdown.
 
 import logging
 from .mongo_client import init_mongo_client, close_mongo_client, get_segments_collection
-from .mongo_segments import STATUS_ALLOCATED
+from .mongo_segments import STATUS_ALLOCATED, MULTI_CLUSTER_TYPE
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +49,31 @@ async def _clear_available_segment_types(col) -> None:
         )
 
 
+async def _listify_multi_cluster_names(col) -> None:
+    """One-time migration: a UPI segment's cluster_name is a list.
+
+    UPI is the one type several clusters may share, so its cluster_name is
+    stored and served as a list of names. A UPI allocation made before that
+    change holds a single string; wrap it so every UPI segment has the same
+    shape.
+    """
+    # $expr/$type reads the field's OWN type. A query-language
+    # `{"cluster_name": {"$type": "string"}}` also matches an ARRAY holding a
+    # string, which would re-wrap every UPI list on every startup.
+    result = await col.update_many(
+        {
+            "type": MULTI_CLUSTER_TYPE,
+            "$expr": {"$eq": [{"$type": "$cluster_name"}, "string"]},
+        },
+        [{"$set": {"cluster_name": ["$cluster_name"]}}],
+    )
+    if result.modified_count:
+        logger.info(
+            "Converted cluster_name to a list on %d UPI segment(s)",
+            result.modified_count,
+        )
+
+
 async def init_storage() -> None:
     """Connect to MongoDB, ensure all required indexes exist, run migrations."""
     await init_mongo_client()
@@ -76,6 +101,7 @@ async def init_storage() -> None:
 
     await _drop_released_fields(col)
     await _clear_available_segment_types(col)
+    await _listify_multi_cluster_names(col)
 
     logger.info(
         "MongoDB storage initialised — indexes ensured on '%s' collection", col.name

@@ -1,8 +1,8 @@
 import logging
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Union
 from fastapi import HTTPException
 
-from ..database import STATUS_AVAILABLE, STATUS_ALLOCATED
+from ..database import STATUS_AVAILABLE, STATUS_ALLOCATED, MULTI_CLUSTER_TYPE
 from ..models.schemas import Segment
 from ..utils.database_utils import DatabaseUtils
 from ..utils.validators import Validators
@@ -152,26 +152,33 @@ class SegmentService:
     @retry_on_network_error(max_retries=3)
     @log_operation_timing("update_segment_clusters", threshold_ms=2000)
     async def update_segment_clusters(
-        segment_value: str, cluster_name: Optional[str], type: Optional[str] = None
+        segment_value: str,
+        cluster_name: Optional[Union[str, List[str]]],
+        type: Optional[str] = None,
     ) -> Dict[str, str]:
-        """Assign a segment to a single cluster as `type`, or release it
+        """Assign a segment to its cluster(s) as `type`, or release it
         (empty/omitted cluster_name).
 
-        One segment belongs to at most one cluster — there is no shared
-        (comma-separated) form. The request model guarantees `type` is set
-        exactly when a cluster is being assigned.
+        A UPI segment may be shared: its cluster_name is stored as a list, and
+        the names sent REPLACE the current list. Every other type belongs to
+        exactly one cluster (the request model refuses a list for them). The
+        request model also guarantees `type` is set exactly when a cluster is
+        being assigned.
         """
         logger.info(f"Updating cluster assignment for segment: {segment_value}")
 
         existing_segment = await SegmentService._get_segment_or_404(segment_value)
         segment_id = str(existing_segment["_id"])
 
-        clean_cluster_name = cluster_name.strip() if cluster_name else None
+        names = cluster_name if isinstance(cluster_name, list) else [cluster_name or ""]
+        # strip, drop blanks and de-duplicate, keeping the caller's order
+        clean_names = list(dict.fromkeys(n.strip() for n in names if n and n.strip()))
 
-        if clean_cluster_name:
-            Validators.validate_cluster_name(clean_cluster_name)
+        if clean_names:
+            for name in clean_names:
+                Validators.validate_cluster_name(name)
             update_data = {
-                "cluster_name": clean_cluster_name,
+                "cluster_name": clean_names if type == MULTI_CLUSTER_TYPE else clean_names[0],
                 "type": type,
                 "allocated_at": get_current_utc(),
             }
@@ -181,7 +188,7 @@ class SegmentService:
         # Keep `status` consistent with the cluster assignment — an edit here is
         # an allocation change like any other, and status, cluster and type all
         # move together unconditionally (there is no third status to preserve).
-        update_data["status"] = STATUS_ALLOCATED if clean_cluster_name else STATUS_AVAILABLE
+        update_data["status"] = STATUS_ALLOCATED if clean_names else STATUS_AVAILABLE
 
         success = await DatabaseUtils.update_segment_by_id(segment_id, update_data)
 

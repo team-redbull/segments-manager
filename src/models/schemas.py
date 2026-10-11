@@ -1,6 +1,8 @@
-from typing import Optional, Literal
+from typing import List, Optional, Literal, Union
 from datetime import datetime
 from pydantic import BaseModel, Field, model_validator
+
+from ..config.constants import MULTI_CLUSTER_TYPE
 
 # ONE inventory type. An MCE's inventory network was briefly split by how a
 # server's BMC is driven — INVENTORY_REDFISH and INVENTORY_IPMI — on the
@@ -74,7 +76,11 @@ class SegmentAllocationRequest(BaseModel):
 
 class SegmentAllocationResponse(BaseModel):
     vlan_id: int = Field(..., description="Allocated VLAN ID", examples=[100])
-    cluster_name: str = Field(..., description="Cluster name", examples=["cluster-prod-01"])
+    cluster_name: Union[str, List[str]] = Field(
+        ...,
+        description="Cluster name — a list of cluster names for a UPI segment, which several clusters may share",
+        examples=["cluster-prod-01"],
+    )
     site: str = Field(..., description="Site name", examples=["site1"])
     type: SegmentType = Field(..., description="Type the segment was allocated as", examples=["MCE"])
     segment: str = Field(..., description="Allocated network segment", examples=["192.168.1.0/24"])
@@ -129,12 +135,20 @@ class SegmentClustersUpdate(BaseModel):
     segment always has a type and an Available one never does. Releasing (empty
     or omitted cluster_name) clears the type, so sending one there is refused
     rather than silently dropped.
+
+    For type UPI, cluster_name may be a list: UPI segments are shared by
+    several clusters. PUT replaces — the list sent IS the segment's new cluster
+    list, so to add a cluster send the current list plus the new name. A list
+    for any other type is refused; those hold exactly one cluster.
     """
     segment: str = Field(..., description="Network segment in CIDR notation (unique per segment)", examples=["192.168.1.0/24"])
-    cluster_name: Optional[str] = Field(
+    cluster_name: Optional[Union[str, List[str]]] = Field(
         default=None,
-        description="Cluster name to assign (one segment belongs to at most one cluster); empty or omitted releases the segment",
-        examples=["cluster-prod-01"],
+        description=(
+            "Cluster name to assign — or, for type UPI only, a list of cluster names that replaces "
+            "the current list; empty or omitted releases the segment"
+        ),
+        examples=["cluster-prod-01", ["cluster-upi-01", "cluster-upi-02"]],
     )
     type: Optional[SegmentType] = Field(
         default=None,
@@ -144,7 +158,11 @@ class SegmentClustersUpdate(BaseModel):
 
     @model_validator(mode="after")
     def _type_goes_with_cluster(self) -> "SegmentClustersUpdate":
-        assigning = bool(self.cluster_name and self.cluster_name.strip())
+        names = self.cluster_name if isinstance(self.cluster_name, list) else [self.cluster_name or ""]
+        assigning = any(name.strip() for name in names)
+        # an empty list assigns nothing — it releases, like an empty string
+        if assigning and isinstance(self.cluster_name, list) and self.type != MULTI_CLUSTER_TYPE:
+            raise ValueError(f"a list of cluster names is only accepted for type {MULTI_CLUSTER_TYPE}")
         if assigning and self.type is None:
             raise ValueError("type is required when assigning a cluster_name")
         if not assigning and self.type is not None:
@@ -169,9 +187,17 @@ class SegmentRelease(BaseModel):
     """Request for POST /api/segments/release, keyed by the segment CIDR.
 
     The CIDR is globally unique, so it alone identifies the allocation — no
-    site, cluster_name or type is needed (or accepted).
+    site or type is needed (or accepted). `cluster_name` is optional and
+    applies to UPI segments only: it removes that one cluster from the shared
+    segment, which returns to Available when its last cluster leaves. Without
+    it the whole segment is released, whatever its type.
     """
     segment: str = Field(..., description="Network segment in CIDR notation (unique per segment)", examples=["192.168.1.0/24"])
+    cluster_name: Optional[str] = Field(
+        default=None,
+        description="UPI segments only: release just this cluster from the segment",
+        examples=["cluster-upi-01"],
+    )
 
     model_config = {
         "extra": "forbid",

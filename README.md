@@ -12,7 +12,8 @@ Segments Manager is **decentralized and per-site**: VLAN IDs and EPG names are u
 
 - **Multi-site VLAN management** — manage segments across sites (site1, site2, …)
 - **Automatic allocation** — atomically find and allocate an available segment for a cluster
-  (one segment belongs to at most one cluster; one cluster may hold several segments)
+  (a segment belongs to one cluster — except a `UPI` segment, which several clusters may share;
+  one cluster may hold several segments)
 - **Comprehensive validation** — site IP-prefix enforcement, CIDR/subnet rules, overlap detection, per-site VLAN & EPG uniqueness
 - **MongoDB backend** — async (Motor) with atomic allocation and a short in-memory cache
 - **CSV/Excel export** and real-time search
@@ -124,11 +125,11 @@ API_TOKEN=change-me-to-a-long-random-secret   # REQUIRED — the only credential
 | POST | `/api/segments` | Create a segment *(auth)* |
 | GET  | `/api/segments/by-segment?segment=` | Get one segment by CIDR |
 | PATCH | `/api/segments` | Update a segment's DHCP flag *(auth)* |
-| PUT  | `/api/segments/clusters` | Update cluster assignment — `type` required with a cluster, cleared on release *(auth)* |
+| PUT  | `/api/segments/clusters` | Update cluster assignment — `type` required with a cluster, cleared on release; for `UPI`, `cluster_name` may be a list that replaces the current one *(auth)* |
 | DELETE | `/api/segments?segment=` | Delete a segment by CIDR *(auth)* |
 | POST | `/api/segments/bulk` | Bulk create *(auth)* |
 | POST | `/api/segments/allocate` | Allocate any Available segment at a site to a cluster, as the given `type` *(auth)* |
-| POST | `/api/segments/release` | Release a segment by CIDR (Allocated → Available, type cleared; idempotent) *(auth)* |
+| POST | `/api/segments/release` | Release a segment by CIDR (Allocated → Available, type cleared; idempotent). Optional `cluster_name` (UPI only) releases just that cluster *(auth)* |
 | GET  | `/api/sites` | Configured sites |
 | GET  | `/api/stats` | Per-site `total_segments` and `allocated` count |
 | GET  | `/api/health` | Health check (MongoDB connectivity) |
@@ -195,6 +196,9 @@ Collection `segments`:
   "allocated_at": null
 }
 ```
+
+A `UPI` segment may be shared by several clusters, so its `cluster_name` is a list,
+e.g. `["ocp4-upi-a", "ocp4-upi-b"]`; every other type's is a single string.
 
 Indexes: unique `{site, vlan_id}`, unique `{segment}`, `{cluster_name}`, `{site}`.
 

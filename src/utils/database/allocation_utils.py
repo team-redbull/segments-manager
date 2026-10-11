@@ -14,6 +14,7 @@ from ...database import (
     get_segments,
     update_segment as _update_segment,
     allocate_segment as _allocate_segment,
+    release_cluster as _release_cluster,
 )
 
 logger = logging.getLogger(__name__)
@@ -26,8 +27,8 @@ class AllocationUtils:
     async def find_existing_allocation(cluster_name: str, site: str, type: str) -> Optional[Dict[str, Any]]:
         """Find an existing allocation of the given type for a cluster at a site.
 
-        `cluster_name` holds exactly one cluster (one segment is never shared by
-        many clusters), so an exact match is the whole search.
+        The cluster filter is a membership test, so a cluster listed on a
+        shared (UPI) segment finds that segment too.
         """
         candidates = await get_segments(
             site=site, cluster_name=cluster_name, status=STATUS_ALLOCATED, type=type
@@ -64,3 +65,10 @@ class AllocationUtils:
             "type": None,
             "cluster_name": None,
         })
+
+    @staticmethod
+    async def release_cluster(segment_id: str, cluster_name: str) -> bool:
+        """Drop one cluster from a multi-cluster (UPI) segment by id; the
+        segment is released (Allocated -> Available) when its last cluster goes.
+        """
+        return await _release_cluster(segment_id, cluster_name)

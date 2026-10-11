@@ -78,10 +78,12 @@ async def update_segment_dhcp(
 async def update_segment_clusters(
     request: SegmentClustersUpdate
 ):
-    """Assign a segment to a single cluster, as a given type.
+    """Assign a segment to its cluster, as a given type.
 
     `type` is required with a cluster_name — an allocated segment always has
-    one. Empty or omitted cluster_name releases the segment and clears its type.
+    one. For type UPI, cluster_name may be a list of clusters sharing the
+    segment; it REPLACES the current list. Empty or omitted cluster_name
+    releases the segment and clears its type.
     """
     return await SegmentService.update_segment_clusters(
         request.segment, request.cluster_name, request.type
@@ -136,8 +138,11 @@ async def release_segment(
     Clears the segment's type along with its cluster. Idempotent for an
     already-"Available" segment (200): the lifecycle has exactly two states,
     so every segment is releasable.
+
+    For a shared UPI segment, an optional cluster_name releases just that
+    cluster; the segment becomes Available when its last cluster leaves.
     """
-    return await AllocationService.release_segment(request.segment)
+    return await AllocationService.release_segment(request.segment, request.cluster_name)
 
 # Statistics and Configuration Routes
 @router.get("/sites")

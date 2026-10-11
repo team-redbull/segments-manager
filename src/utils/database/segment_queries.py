@@ -7,7 +7,7 @@ import re
 import logging
 from typing import Optional, List, Dict, Any
 
-from ...database import get_segments
+from ...database import get_segments, segment_clusters
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +51,9 @@ class SegmentQueries:
         def _matches_search(s: dict) -> bool:
             if vlan_id_search is not None and s.get("vlan_id") == vlan_id_search:
                 return True
-            for field in ("cluster_name", "epg_name", "segment"):
+            if any(pattern.search(c) for c in segment_clusters(s)):
+                return True
+            for field in ("epg_name", "segment"):
                 if pattern.search(str(s.get(field) or "")):
                     return True
             return False

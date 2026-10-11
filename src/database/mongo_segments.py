@@ -11,6 +11,7 @@ import asyncio
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 
+from ..config.constants import MULTI_CLUSTER_TYPE
 from .mongo_client import get_segments_collection
 from .mongo_utils import _doc_to_segment, _to_object_id
 from .cache import (
@@ -24,6 +25,15 @@ logger = logging.getLogger(__name__)
 # Segment lifecycle statuses: Available -> Allocated -> Available.
 STATUS_AVAILABLE = "Available"
 STATUS_ALLOCATED = "Allocated"
+
+
+def segment_clusters(segment: Dict[str, Any]) -> List[str]:
+    """Return the clusters holding a segment as a list, whatever its shape —
+    a list (UPI), a single name (every other type) or None (Available)."""
+    clusters = segment.get("cluster_name")
+    if not clusters:
+        return []
+    return list(clusters) if isinstance(clusters, list) else [clusters]
 
 
 # ---------------------------------------------------------------------------
@@ -43,7 +53,7 @@ def _segment_matches(
         return False
     if vlan_id is not None and segment.get("vlan_id") != vlan_id:
         return False
-    if cluster_name is not None and segment.get("cluster_name") != cluster_name:
+    if cluster_name is not None and cluster_name not in segment_clusters(segment):
         return False
     if status is not None and str(segment.get("status", "")).lower() != status.lower():
         return False
@@ -161,7 +171,8 @@ async def allocate_segment(
 
     Available segments carry no type, so `type` does not narrow the search —
     any Available segment at the site qualifies, and it BECOMES that type in
-    the same update that allocates it (release clears it again).
+    the same update that allocates it (release clears it again). A UPI
+    segment's cluster_name is stored as a list, so it starts as [cluster_name].
 
     Uses find_one_and_update for true atomicity — unlike the previous two-step
     find-then-update approach, concurrent callers cannot receive the same segment.
@@ -179,7 +190,7 @@ async def allocate_segment(
         "$set": {
             "status": STATUS_ALLOCATED,
             "type": type,
-            "cluster_name": cluster_name,
+            "cluster_name": [cluster_name] if type == MULTI_CLUSTER_TYPE else cluster_name,
             "allocated_at": datetime.now(timezone.utc),
         }
     }
@@ -194,3 +205,29 @@ async def allocate_segment(
         invalidate_cache(CACHE_KEY_SEGMENTS)
         return _doc_to_segment(doc)
     return None
+
+
+async def release_cluster(segment_id: str, cluster_name: str) -> bool:
+    """Remove one cluster from an Allocated multi-cluster (UPI) segment, and
+    release the segment (Allocated -> Available) once no cluster is left.
+
+    The removal and the release are each conditioned on the stored state, so
+    a concurrent edit can never release a segment another cluster still holds.
+    Returns True if the segment was modified.
+    """
+    oid = _to_object_id(segment_id)
+    col = get_segments_collection()
+    held = {"_id": oid, "status": STATUS_ALLOCATED}
+
+    pulled = await col.update_one(
+        {**held, "cluster_name": {"$elemMatch": {"$eq": cluster_name}}},
+        {"$pull": {"cluster_name": cluster_name}},
+    )
+    emptied = await col.update_one(
+        {**held, "cluster_name": {"$size": 0}},
+        {"$set": {"status": STATUS_AVAILABLE, "type": None, "cluster_name": None}},
+    )
+    if pulled.modified_count or emptied.modified_count:
+        invalidate_cache(CACHE_KEY_SEGMENTS)
+        return True
+    return False

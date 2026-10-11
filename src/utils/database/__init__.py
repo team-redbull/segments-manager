@@ -24,6 +24,7 @@ class DatabaseUtils:
     find_and_allocate_segment = staticmethod(AllocationUtils.find_and_allocate_segment)
     find_available_segment = staticmethod(AllocationUtils.find_available_segment)
     release_segment = staticmethod(AllocationUtils.release_segment)
+    release_cluster = staticmethod(AllocationUtils.release_cluster)
 
     # CRUD operations
     create_segment = staticmethod(SegmentCRUD.create_segment)

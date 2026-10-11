@@ -1,8 +1,8 @@
 import logging
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from fastapi import HTTPException
 
-from ..database import STATUS_ALLOCATED
+from ..database import STATUS_ALLOCATED, MULTI_CLUSTER_TYPE, segment_clusters
 from ..models.schemas import SegmentAllocationRequest, SegmentAllocationResponse
 from ..utils.database_utils import DatabaseUtils
 from ..utils.validators import Validators
@@ -64,7 +64,7 @@ class AllocationService:
 
         return SegmentAllocationResponse(
             vlan_id=allocated_segment["vlan_id"],
-            cluster_name=request.cluster_name,
+            cluster_name=allocated_segment["cluster_name"],
             site=request.site,
             type=allocated_segment["type"],
             segment=allocated_segment["segment"],
@@ -76,11 +76,17 @@ class AllocationService:
     @handle_db_errors
     @retry_on_network_error(max_retries=3)
     @log_operation_timing("release_segment", threshold_ms=2000)
-    async def release_segment(segment: str) -> Dict[str, str]:
+    async def release_segment(segment: str, cluster_name: Optional[str] = None) -> Dict[str, str]:
         """Release a segment identified by its CIDR (status "Allocated" -> "Available").
 
         Keyed by the CIDR because it is globally unique, so it alone identifies
         the allocation.
+
+        `cluster_name` releases just that cluster from a shared UPI segment;
+        the segment itself goes back to Available when its last cluster leaves.
+        A cluster no longer on the segment is a no-op 200, so a retried call is
+        safe. It is refused (400) for any other type: those hold one cluster,
+        and releasing by CIDR alone frees it.
 
         The lifecycle is two-way and has exactly two states, so release is
         total — every segment is either Allocated or Available:
@@ -101,9 +107,39 @@ class AllocationService:
         if status != STATUS_ALLOCATED:
             return {"message": "Segment already released"}
 
+        if cluster_name is not None:
+            return await AllocationService._release_cluster(existing, cluster_name)
+
         success = await DatabaseUtils.release_segment(str(existing["_id"]))
         if not success:
             raise HTTPException(status_code=500, detail="Failed to release segment")
 
         logger.info(f"Released segment {segment} (was allocated to {existing.get('cluster_name')})")
         return {"message": "Segment released successfully"}
+
+    @staticmethod
+    async def _release_cluster(existing: Dict[str, Any], cluster_name: str) -> Dict[str, str]:
+        """Remove one cluster from an Allocated UPI segment (see release_segment)."""
+        segment = existing["segment"]
+        if existing.get("type") != MULTI_CLUSTER_TYPE:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"cluster_name is only accepted when releasing a {MULTI_CLUSTER_TYPE} segment; "
+                    f"{segment} is {existing.get('type')} — release it by segment alone"
+                ),
+            )
+
+        clusters = segment_clusters(existing)
+        if cluster_name not in clusters:
+            return {"message": f"Cluster {cluster_name} already released from segment"}
+
+        success = await DatabaseUtils.release_cluster(str(existing["_id"]), cluster_name)
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to release cluster from segment")
+
+        if len(clusters) == 1:
+            logger.info(f"Released segment {segment} (its last cluster, {cluster_name}, left)")
+            return {"message": "Segment released successfully"}
+        logger.info(f"Released cluster {cluster_name} from shared segment {segment}")
+        return {"message": f"Cluster {cluster_name} released from segment"}
